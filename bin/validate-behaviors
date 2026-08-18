@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# validate-behaviors — structural check of .agents/behaviors/*/BEHAVIOR.md against the Agent Behavior spec
+# (agentbehavior.dev): frontmatter present and a YAML mapping, name = directory name, lowercase/digits/hyphens,
+# ≤64 chars, no leading/trailing hyphen, non-empty description ≤1024. Exit 1 on any problem.
+# Usage: bin/validate-behaviors [repo-root | a behaviors directory]
+set -eu
+root="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
+python3 - "$root" <<'PY'
+import os, re, sys
+arg = sys.argv[1]
+def is_behaviors_dir(d):
+    return os.path.isdir(d) and any(os.path.isfile(os.path.join(d, x, "BEHAVIOR.md")) for x in os.listdir(d))
+root = arg if is_behaviors_dir(arg) else os.path.join(arg, ".agents", "behaviors")
+bad = 0; n = 0
+if not os.path.isdir(root):
+    print("no .agents/behaviors/ directory"); sys.exit(0)
+for d in sorted(os.listdir(root)):
+    p = os.path.join(root, d, "BEHAVIOR.md")
+    if not os.path.isdir(os.path.join(root, d)): continue
+    n += 1
+    if not os.path.isfile(p):
+        print(f"FAIL {d}: no BEHAVIOR.md"); bad += 1; continue
+    text = open(p, encoding="utf-8").read()
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        print(f"FAIL {d}: no YAML frontmatter"); bad += 1; continue
+    fm = {}
+    for line in m.group(1).splitlines():
+        if ":" in line and not line.startswith((" ", "\t")):
+            k, v = line.split(":", 1); fm[k.strip()] = v.strip().strip('"').strip("'")
+    name = fm.get("name", ""); desc = fm.get("description", "")
+    problems = []
+    if not name: problems.append("missing name")
+    elif name != d: problems.append(f"name '{name}' != directory '{d}'")
+    elif not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name) or len(name) > 64: problems.append("name must be lowercase/digits/hyphens, ≤64, no edge hyphens")
+    if not desc: problems.append("missing description")
+    elif len(desc) > 1024: problems.append("description > 1024 chars")
+    if not text[m.end():].strip(): problems.append("empty body")
+    if problems: print(f"FAIL {d}: " + "; ".join(problems)); bad += 1
+    else: print(f"ok   {d} — {desc[:80]}")
+print(f"{n - bad}/{n} valid"); sys.exit(1 if bad else 0)
+PY

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# install — wire this agent into the human's Claude Code on this machine (idempotent):
+#   · ~/.agentmail/inbox            ← AGENT_EMAIL from AGENTS.md (the brief needs it)
+#   · ~/.claude/settings.json hooks ← bin/agent-brief on SessionStart, UserPromptSubmit, PostToolUse
+#   · user-scope MCP server `agentmail` ← bin/agentmail-mcp (any session can act on mail; no key in config)
+# `install --check` prints "installed" / "not installed" and exits 0/1.
+set -eu
+here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
+settings="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
+cmd="$here/agent-brief"
+
+hooks_ok() { python3 - "$settings" "$cmd" <<'PY'
+import json,os,sys
+p,cmd=sys.argv[1],sys.argv[2]
+try: d=json.load(open(p))
+except Exception: sys.exit(1)
+for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
+    if not any(h.get("command")==cmd for e in d.get("hooks",{}).get(ev,[]) for h in e.get("hooks",[])): sys.exit(1)
+PY
+}
+# checked from $HOME so the repo's own .mcp.json entry does not masquerade as the user-scope one
+mcp_ok() { command -v claude >/dev/null 2>&1 && (cd "$HOME" && claude mcp get agentmail >/dev/null 2>&1); }
+
+if [ "${1:-}" = "--uninstall" ]; then
+  python3 - "$settings" <<'PY'
+import json,os,sys
+p=sys.argv[1]
+try: d=json.load(open(p))
+except Exception: sys.exit(0)
+for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
+    lst=d.get("hooks",{}).get(ev,[])
+    for e in lst: e["hooks"]=[h for h in e.get("hooks",[]) if not h.get("command","").endswith("bin/agent-brief")]
+    d.get("hooks",{})[ev]=[e for e in lst if e.get("hooks")]
+tmp=p+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,p)
+PY
+  command -v claude >/dev/null 2>&1 && claude mcp remove --scope user agentmail >/dev/null 2>&1 || true
+  echo "uninstalled (hooks + user-scope bridge removed; ~/.agentmail and the inbox untouched)"; exit 0
+fi
+
+if [ "${1:-}" = "--check" ]; then
+  if hooks_ok && mcp_ok && [ -s "$home/inbox" ]; then echo installed; exit 0; else echo "not installed"; exit 1; fi
+fi
+
+# 1. inbox file from AGENTS.md
+email=$(sed -n 's/.*My inbox is \*\*\([^*]*\)\*\*.*/\1/p' "$repo/AGENTS.md" | head -1)
+if [ -n "$email" ] && ! printf '%s' "$email" | grep -q '{{'; then
+  mkdir -p "$home"; chmod 700 "$home"; printf '%s\n' "$email" > "$home/inbox"; echo "inbox: $email"
+else
+  echo "inbox: AGENTS.md has no filled-in inbox yet (run onboard)"
+fi
+
+# 2. hooks
+mkdir -p "$(dirname "$settings")"
+python3 - "$settings" "$cmd" <<'PY'
+import json,os,sys
+p,cmd=sys.argv[1],sys.argv[2]
+d=json.load(open(p)) if os.path.exists(p) else {}
+hooks=d.setdefault("hooks",{}); changed=False
+for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
+    lst=hooks.setdefault(ev,[])
+    have=[h for e in lst for h in e.get("hooks",[]) if h.get("command","").endswith("bin/agent-brief")]
+    if have:
+        for h in have:
+            if h["command"]!=cmd: h["command"]=cmd; changed=True   # repo moved → repoint
+    else:
+        lst.append({"hooks":[{"type":"command","command":cmd,"timeout":10}]}); changed=True
+if changed:
+    tmp=p+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,p)
+print("hooks:", "updated" if changed else "already present")
+PY
+
+# 3. user-scope MCP bridge (skip quietly if claude CLI is absent — the Desktop app shares ~/.claude.json once the CLI adds it)
+if command -v claude >/dev/null 2>&1; then
+  if mcp_ok; then echo "mcp: agentmail already registered (user scope)"
+  else (cd "$HOME" && claude mcp add --scope user --transport stdio agentmail -- "$here/agentmail-mcp" >/dev/null) && echo "mcp: agentmail registered (user scope)"; fi
+else
+  echo "mcp: claude CLI not found — run: claude mcp add --scope user --transport stdio agentmail -- $here/agentmail-mcp"
+fi
+echo installed

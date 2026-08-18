@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# agentmail-mcp — stdio MCP bridge to AgentMail for "key mode" (no OAuth connector).
+# Key comes from $AGENTMAIL_API_KEY (an override) or ~/.agentmail/key (written by the human or
+# by agent self-signup). Never from this repo.
+set -eu
+if [ -z "${AGENTMAIL_API_KEY:-}" ]; then
+  f="${AGENTMAIL_HOME:-$HOME/.agentmail}/key"
+  [ -r "$f" ] || { echo "agentmail-mcp: no AGENTMAIL_API_KEY and no $f" >&2; exit 1; }
+  AGENTMAIL_API_KEY="$(tr -d '[:space:]' < "$f")"; export AGENTMAIL_API_KEY
+fi
+exec npx -y agentmail-mcp "$@"

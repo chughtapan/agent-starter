@@ -1,0 +1,96 @@
+{
+  "count": 4,
+  "threads": [
+    {
+      "inbox_id": "test-agent@agentmail.to",
+      "thread_id": "thr_needs",
+      "labels": [
+        "needs-human"
+      ],
+      "timestamp": "2026-08-17T14:05:00Z",
+      "senders": [
+        "maya-agent (agent of Maya Ito) <maya-agent@agentmail.to>"
+      ],
+      "recipients": [
+        "test-agent@agentmail.to"
+      ],
+      "last_message_id": "msg_1",
+      "message_count": 2,
+      "size": 2048,
+      "updated_at": "2026-08-17T14:05:00Z",
+      "created_at": "2026-08-17T11:00:00Z",
+      "subject": "dataset access",
+      "preview": "Could your owner share the eval split?"
+    },
+    {
+      "inbox_id": "test-agent@agentmail.to",
+      "thread_id": "thr_info",
+      "labels": [
+        "processed"
+      ],
+      "timestamp": "2026-08-17T09:00:00Z",
+      "senders": [
+        "facilitator-agent <facilitator-agent@agentmail.to>"
+      ],
+      "recipients": [
+        "test-agent@agentmail.to"
+      ],
+      "last_message_id": "msg_2",
+      "message_count": 1,
+      "size": 1024,
+      "updated_at": "2026-08-17T09:00:00Z",
+      "created_at": "2026-08-17T09:00:00Z",
+      "subject": "weekly notes",
+      "preview": "Nothing to do."
+    },
+    {
+      "inbox_id": "test-agent@agentmail.to",
+      "thread_id": "thr_replied",
+      "labels": [
+        "sent",
+        "received",
+        "unread"
+      ],
+      "timestamp": "2026-08-17T15:00:00Z",
+      "senders": [
+        "test-agent@agentmail.to",
+        "facilitator-agent <facilitator-agent@agentmail.to>"
+      ],
+      "recipients": [
+        "facilitator-agent@agentmail.to",
+        "test-agent@agentmail.to"
+      ],
+      "last_message_id": "msg_r",
+      "message_count": 2,
+      "size": 1024,
+      "updated_at": "2026-08-17T15:00:00Z",
+      "created_at": "2026-08-17T12:00:00Z",
+      "sent_timestamp": "2026-08-17T12:00:00Z",
+      "received_timestamp": "2026-08-17T15:00:00Z",
+      "subject": "[INTRO] test-agent for Test Owner",
+      "preview": "Welcome, test-agent."
+    },
+    {
+      "inbox_id": "test-agent@agentmail.to",
+      "thread_id": "thr_isent",
+      "labels": [
+        "sent"
+      ],
+      "timestamp": "2026-08-17T16:00:00Z",
+      "senders": [
+        "test-agent@agentmail.to"
+      ],
+      "recipients": [
+        "maya-agent@agentmail.to"
+      ],
+      "last_message_id": "msg_s",
+      "message_count": 1,
+      "size": 512,
+      "updated_at": "2026-08-17T16:00:00Z",
+      "created_at": "2026-08-17T16:00:00Z",
+      "sent_timestamp": "2026-08-17T16:00:00Z",
+      "subject": "question for maya",
+      "preview": "\u2026"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# agent-upgrade — pull the latest kit from the template and apply it here.
+# Everyone must be on the same protocol, so this does not ask: if upstream VERSION
+# is newer it replaces every kit file (all but AGENTS.md/CLAUDE.md, roster.md, .agents/, .git),
+# commits, pushes, and prints "upgrading agent kit X → Y". `--if-due` runs at
+# most once per AGENT_KIT_UPGRADE_INTERVAL seconds (default 1 day) and is silent when current.
+# Template source: `.agent-kit` (template=<owner/repo | https git url | file:///…tgz>), default chughtapan/agent-starter.
+# Fetches with a shallow git clone (always fresh; private forks work with the user's git credentials).
+# The whole body is a function, invoked on the last line together with `exit`, so bash has parsed everything it
+# will ever execute before this very file gets overwritten by the upgrade.
+set -eu
+WORK=""
+trap '[ -n "$WORK" ] && rm -rf "$WORK"' EXIT
+main() {
+  local here repo interval stamp now last quiet src work up new cur newest
+  here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"; cd "$repo"
+  interval="${AGENT_KIT_UPGRADE_INTERVAL:-86400}"; stamp="${AGENTMAIL_HOME:-$HOME/.agentmail}/.upgrade-stamp"
+  quiet=0
+  if [ "${1:-}" = "--if-due" ]; then
+    now=$(date +%s); last=$(cat "$stamp" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0;; esac
+    [ $((now - last)) -lt "$interval" ] && return 0
+    mkdir -p "$(dirname "$stamp")"; echo "$now" > "$stamp"; quiet=1
+  fi
+  src=$(sed -n 's/^template=//p' .agent-kit 2>/dev/null | head -1); src="${src:-chughtapan/agent-starter}"
+  work=$(mktemp -d); WORK="$work"
+  case "$src" in
+    file://*) tar xzf "${src#file://}" -C "$work" 2>/dev/null || true;;   # tests: a local tarball
+    http*)    git clone -q --depth 1 "$src" "$work/up" 2>/dev/null || true;;
+    *)        git clone -q --depth 1 "https://github.com/${src}.git" "$work/up" 2>/dev/null || true;;
+  esac
+  up=$(find "$work" -mindepth 1 -maxdepth 1 -type d | head -1)
+  if [ -z "$up" ] || [ ! -f "$up/VERSION" ]; then [ $quiet = 1 ] || echo "agent-upgrade: could not fetch template ($src)"; return 1; fi
+  new=$(tr -d '[:space:]' < "$up/VERSION")
+  if [ -f VERSION ]; then cur=$(tr -d '[:space:]' < VERSION); else cur=0.0.0; fi
+  newest=$(printf '%s\n%s\n' "$cur" "$new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+  if [ "$new" = "$cur" ] || [ "$newest" != "$new" ]; then [ $quiet = 1 ] || echo "agent kit $cur is current"; return 0; fi
+  # apply: everything except identity/state
+  ( cd "$up" && find . -type f ! -name AGENTS.md ! -name CLAUDE.md ! -name roster.md ! -path './.git/*' ! -path './.agents/*' -print0 ) | while IFS= read -r -d '' f; do
+    mkdir -p "$(dirname "$f")"; cp "$up/$f" "$f"
+  done
+  # kit-owned dirs: drop files upstream no longer ships (identity/state never live here)
+  for d in bin .claude/skills docs test; do
+    [ -d "$d" ] || continue
+    ( cd "$d" && find . -type f -print0 ) | while IFS= read -r -d '' f; do
+      [ -f "$up/$d/$f" ] || rm -f "$d/$f"
+    done
+    find "$d" -depth -type d -empty -delete 2>/dev/null || true
+  done
+  find bin -type f -exec chmod +x {} + 2>/dev/null || true
+  git add -A >/dev/null 2>&1 || true
+  git -c user.name="${GIT_AUTHOR_NAME:-agent-upgrade}" -c user.email="${GIT_AUTHOR_EMAIL:-agent-upgrade@localhost}" commit -qm "chore: upgrade agent kit to $new" >/dev/null 2>&1 || true
+  [ -n "${AGENT_KIT_NO_PUSH:-}" ] || git push -q 2>/dev/null || true
+  echo "upgrading agent kit $cur → $new — identity (AGENTS.md), roster.md and .agents/ untouched"
+}
+main "$@"; exit $?

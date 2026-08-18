@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# agentmail — minimal AgentMail REST helper for key mode, so an agent can act on its inbox even in a
+# session where the MCP bridge isn't loaded (e.g. the very first onboarding session). Key from
+# ~/.agentmail/key (or AGENTMAIL_API_KEY); inbox from ~/.agentmail/inbox (or AGENTMAIL_INBOX).
+#   agentmail send  --to a@x[,b@y] [--cc c@z] --subject S --text-file FILE   [--labels l1,l2]
+#   agentmail reply --message-id ID --text-file FILE [--cc c@z]
+#   agentmail threads [--limit N] [--subject SUBSTR]     # JSON
+#   agentmail thread THREAD_ID                           # JSON
+#   agentmail label THREAD_ID --add l1,l2 [--remove l3]
+#   agentmail signup HUMAN_EMAIL USERNAME               # agent self-signup: writes ~/.agentmail/{key,inbox}; key never printed
+#   agentmail verify CODE                                # the 6-digit code AgentMail emailed the human
+#   agentmail whoami                                     # live check: prints the inbox address (exit 1 if the API rejects the key)
+set -eu
+home="${AGENTMAIL_HOME:-$HOME/.agentmail}"; api="${AGENTMAIL_API:-https://api.agentmail.to}"
+key="${AGENTMAIL_API_KEY:-$(tr -d '[:space:]' < "$home/key" 2>/dev/null || true)}"
+inbox="${AGENTMAIL_INBOX:-$(tr -d '[:space:]' < "$home/inbox" 2>/dev/null || true)}"
+cmd="${1:-}"; shift || true
+if [ "$cmd" = signup ]; then
+  human="${1:-}"; user="${2:-}"; [ -n "$human" ] && [ -n "$user" ] || { echo "usage: agentmail signup HUMAN_EMAIL USERNAME" >&2; exit 2; }
+  mkdir -p "$home"; chmod 700 "$home"
+  resp=$(curl -sS -m 30 -X POST "$api/v0/agent/sign-up" -H "Content-Type: application/json" -d "{\"human_email\":\"$human\",\"username\":\"$user\"}")
+  RESP="$resp" HOME_DIR="$home" python3 - <<'PY'
+import json, os, sys
+d = json.loads(os.environ["RESP"])
+if "api_key" not in d:
+    print("agentmail signup failed:", d.get("message") or d.get("error") or d, file=sys.stderr); sys.exit(1)
+h = os.environ["HOME_DIR"]
+open(os.path.join(h, "key"), "w").write(d["api_key"]); os.chmod(os.path.join(h, "key"), 0o600)
+open(os.path.join(h, "inbox"), "w").write(d["inbox_id"])
+print("inbox:", d["inbox_id"], "— a 6-digit code was emailed to the human; run: agentmail verify CODE")
+PY
+  exit $?
+fi
+[ -n "$key" ] && [ -n "$inbox" ] || { echo "agentmail: need $home/key and $home/inbox (run: agentmail signup HUMAN_EMAIL USERNAME) or AGENTMAIL_API_KEY / AGENTMAIL_INBOX" >&2; exit 2; }
+json_list() { python3 -c 'import json,sys; print(json.dumps([x for x in sys.argv[1].split(",") if x]))' "$1"; }
+call() { curl -sS -m 30 -H "Authorization: Bearer $key" -H "Content-Type: application/json" "$@"; }
+case "$cmd" in
+  whoami) call "$api/v0/inboxes/$inbox" | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+if d.get("inbox_id"): print(d["inbox_id"])
+else: print("agentmail: API rejected the key/inbox:", d, file=sys.stderr); sys.exit(1)';;
+  verify) [ -n "${1:-}" ] || { echo "usage: agentmail verify CODE" >&2; exit 2; }
+    call -X POST "$api/v0/agent/verify" -d "{\"otp_code\":\"$1\"}" | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+print("verified" if d.get("verified") else "not verified: "+str(d.get("message") or d)); sys.exit(0 if d.get("verified") else 1)';;
+  threads)
+    limit=20; subject=""
+    while [ $# -gt 0 ]; do case "$1" in --limit) limit="$2"; shift 2;; --subject) subject="$2"; shift 2;; *) shift;; esac; done
+    q="limit=$limit"; [ -n "$subject" ] && q="$q&subject=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$subject")"
+    call "$api/v0/inboxes/$inbox/threads?$q";;
+  thread) call "$api/v0/inboxes/$inbox/threads/$1";;
+  send|reply)
+    to=""; cc=""; subject=""; file=""; labels=""; mid=""
+    while [ $# -gt 0 ]; do case "$1" in --to) to="$2"; shift 2;; --cc) cc="$2"; shift 2;; --subject) subject="$2"; shift 2;; --text-file) file="$2"; shift 2;; --labels) labels="$2"; shift 2;; --message-id) mid="$2"; shift 2;; *) shift;; esac; done
+    [ -n "$file" ] && [ -f "$file" ] || { echo "agentmail: --text-file FILE required" >&2; exit 2; }
+    body=$(SUBJ="$subject" TO="$to" CC="$cc" LABELS="$labels" python3 -c '
+import json,os,sys
+b={"text":open(sys.argv[1]).read()}
+if os.environ["TO"]: b["to"]=[x for x in os.environ["TO"].split(",") if x]
+if os.environ["CC"]: b["cc"]=[x for x in os.environ["CC"].split(",") if x]
+if os.environ["SUBJ"]: b["subject"]=os.environ["SUBJ"]
+if os.environ["LABELS"]: b["labels"]=[x for x in os.environ["LABELS"].split(",") if x]
+print(json.dumps(b))' "$file")
+    if [ "$cmd" = send ]; then call -X POST "$api/v0/inboxes/$inbox/messages/send" -d "$body"
+    else [ -n "$mid" ] || { echo "agentmail: --message-id required" >&2; exit 2; }; call -X POST "$api/v0/inboxes/$inbox/messages/$mid/reply" -d "$body"; fi;;
+  label)
+    tid="$1"; shift; add=""; rem=""
+    while [ $# -gt 0 ]; do case "$1" in --add) add="$2"; shift 2;; --remove) rem="$2"; shift 2;; *) shift;; esac; done
+    call -X PATCH "$api/v0/inboxes/$inbox/threads/$tid" -d "{\"add_labels\":$(json_list "$add"),\"remove_labels\":$(json_list "$rem")}";;
+  *) sed -n '2,10p' "$0"; exit 2;;
+esac

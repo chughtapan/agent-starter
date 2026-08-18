@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# agent-brief — Claude Code hook (SessionStart / UserPromptSubmit / PostToolUse):
+# tell the human, inside the session, when their agent's inbox has something new
+# for them, and offer to work through it. Silent when nothing is new. Throttled
+# (default 5 min) and deduplicated by thread, so it never repeats itself.
+# Also raises a local desktop notification for a new brief, and on SessionStart runs
+# the daily kit upgrade check (bin/agent-upgrade).
+# Never blocks a session: any failure exits 0 with no output.
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
+api="${AGENTMAIL_API:-https://api.agentmail.to}"
+min="${AGENT_BRIEF_MIN_INTERVAL:-300}"
+key_file="$home/key"; inbox_file="$home/inbox"; state="$home/brief-state.json"; stamp="$home/.brief-stamp"
+
+# hook input (may be absent when run by hand)
+event=""
+if [ ! -t 0 ]; then
+  input=$(cat 2>/dev/null || true)
+  event=$(printf '%s' "$input" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' | head -1)
+fi
+
+emit() { # $1 = text; wrap for the hook event, plain when run by hand
+  [ -n "$1" ] || return 0
+  if [ -n "$event" ]; then
+    EV="$event" TXT="$1" python3 -c 'import json,os; print(json.dumps({"hookSpecificOutput":{"hookEventName":os.environ["EV"],"additionalContext":os.environ["TXT"]}}))'
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+upgrade_note=""
+if [ "$event" = "SessionStart" ] && [ -x "$here/agent-upgrade" ] && [ -z "${AGENT_BRIEF_NO_UPGRADE:-}" ]; then
+  upgrade_note=$(AGENT_KIT_UPGRADE_INTERVAL="${AGENT_BRIEF_UPGRADE_INTERVAL:-86400}" "$here/agent-upgrade" --if-due 2>/dev/null || true)
+fi
+
+[ -r "$key_file" ] && [ -r "$inbox_file" ] || { emit "$upgrade_note"; exit 0; }
+now=$(date +%s)
+last=$(cat "$stamp" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0;; esac   # cheap: PostToolUse runs this on every tool call
+if [ $((now - last)) -lt "$min" ]; then emit "$upgrade_note"; exit 0; fi
+mkdir -p "$home"; echo "$now" > "$stamp"
+
+key=$(tr -d '[:space:]' < "$key_file"); inbox=$(tr -d '[:space:]' < "$inbox_file")
+[ -n "$key" ] && [ -n "$inbox" ] || { emit "$upgrade_note"; exit 0; }
+json=$(curl -sS -m 8 -H "Authorization: Bearer $key" "$api/v0/inboxes/$inbox/threads?limit=30" 2>/dev/null) || { emit "$upgrade_note"; exit 0; }
+
+brief=$(AB_JSON="$json" AB_STATE="$state" AB_NOW="$now" AB_INBOX="$inbox" AB_REPO="$(dirname "$here")" python3 - <<'PY' 2>/dev/null
+import json, os, sys
+try:
+    d = json.loads(os.environ["AB_JSON"])
+except Exception:
+    sys.exit(0)
+state_path = os.environ["AB_STATE"]; now = int(os.environ["AB_NOW"]); me = os.environ["AB_INBOX"]; repo = os.environ["AB_REPO"]
+try:
+    st = json.load(open(state_path))
+except Exception:
+    st = {}
+seen = st.get("seen", {})
+def addr(s):
+    return s.split("<")[-1].rstrip(">").strip()
+need, fresh = [], []
+for t in d.get("threads", []):
+    labels = set(t.get("labels") or [])
+    tid = t.get("thread_id"); stamp = t.get("updated_at") or t.get("timestamp") or ""
+    if seen.get(tid) == stamp:
+        continue
+    # "new" = the last message in the thread was received (not sent by us) and the pass hasn't seen it
+    rcv = t.get("received_timestamp") or ""; snt = t.get("sent_timestamp") or ""
+    last_was_received = bool(rcv) and (not snt or rcv > snt)
+    if "needs-human" in labels:
+        need.append(t)
+    elif last_was_received and "processed" not in labels:
+        fresh.append(t)
+    seen[tid] = stamp
+st["seen"] = seen; st["last_check"] = now
+os.makedirs(os.path.dirname(state_path), exist_ok=True)
+json.dump(st, open(state_path, "w"))
+if not need and not fresh:
+    sys.exit(0)
+name = me.split("@")[0]
+lines = [f"📬 {name}: {len(need)} need you, {len(fresh)} new since last check"]
+for t in need[:3]:
+    lines.append(f"  · needs you: {t.get('subject') or '(no subject)'} ← {addr((t.get('senders') or ['?'])[0])}")
+def last_sender(t):
+    # senders is a set-like list; prefer the one that isn't us
+    others = [addr(x) for x in (t.get("senders") or []) if addr(x) != me]
+    return others[-1] if others else "?"
+for t in fresh[:3]:
+    lines.append(f"  · new: {t.get('subject') or '(no subject)'} ← {last_sender(t)}")
+extra = len(need) + len(fresh) - min(3, len(need)) - min(3, len(fresh))
+if extra > 0:
+    lines.append(f"  · … and {extra} more")
+lines.append(f"  If the user is not mid-task, offer once: \"want me to work through them?\" — on yes, run the inbox skill "
+             f"({repo}/.claude/skills/inbox/SKILL.md) in a subagent with cwd {repo}; the AgentMail tools are the user-scope `agentmail` MCP server. "
+             f"Otherwise just say the one line above and carry on.")
+print("\n".join(lines))
+PY
+)
+# local push: one notification per new brief (macOS / freedesktop), never in tests
+if [ -n "$brief" ] && [ -z "${AGENT_BRIEF_NO_NOTIFY:-}" ]; then
+  first=$(printf '%s\n' "$brief" | head -1); second=$(printf '%s\n' "$brief" | sed -n 2p | sed 's/^ *· *//')
+  if command -v osascript >/dev/null 2>&1; then
+    T="$first" S="$second" osascript -e 'display notification (system attribute "S") with title (system attribute "T")' >/dev/null 2>&1 || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "$first" "$second" >/dev/null 2>&1 || true
+  fi
+fi
+text="$brief"
+if [ -n "$upgrade_note" ]; then text="${upgrade_note}${text:+
+$text}"; fi
+emit "$text"
+exit 0
