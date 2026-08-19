@@ -9,11 +9,12 @@
 #   agentmail label THREAD_ID --add l1,l2 [--remove l3]
 #   agentmail signup HUMAN_EMAIL USERNAME               # agent self-signup: writes ~/.agentmail/{key,inbox}; key never printed
 #   agentmail verify CODE                                # the 6-digit code AgentMail emailed the human
+#   agentmail add-inbox USERNAME DIR                     # second inbox in THIS org (same API key), written to DIR/{key,inbox}
 #   agentmail whoami                                     # live check: prints the inbox address (exit 1 if the API rejects the key)
 set -eu
 home="${AGENTMAIL_HOME:-$HOME/.agentmail}"; api="${AGENTMAIL_API:-https://api.agentmail.to}"
-key="${AGENTMAIL_API_KEY:-$(tr -d '[:space:]' < "$home/key" 2>/dev/null || true)}"
-inbox="${AGENTMAIL_INBOX:-$(tr -d '[:space:]' < "$home/inbox" 2>/dev/null || true)}"
+key="${AGENTMAIL_API_KEY:-$(tr -d '[:space:]' 2>/dev/null < "$home/key" || true)}"
+inbox="${AGENTMAIL_INBOX:-$(tr -d '[:space:]' 2>/dev/null < "$home/inbox" || true)}"
 cmd="${1:-}"; shift || true
 if [ "$cmd" = signup ]; then
   human="${1:-}"; user="${2:-}"; [ -n "$human" ] && [ -n "$user" ] || { echo "usage: agentmail signup HUMAN_EMAIL USERNAME" >&2; exit 2; }
@@ -23,7 +24,12 @@ if [ "$cmd" = signup ]; then
 import json, os, sys
 d = json.loads(os.environ["RESP"])
 if "api_key" not in d:
-    print("agentmail signup failed:", d.get("message") or d.get("error") or d, file=sys.stderr); sys.exit(1)
+    msg = d.get("message") or d.get("error") or d
+    print("agentmail signup failed:", msg, file=sys.stderr)
+    if "already exists" in str(msg):
+        print("  this human email already owns an AgentMail org (another agent signed up with it). Either use a different",
+              "\n  email, or have that org create the inbox: agentmail add-inbox USERNAME (run with that org's AGENTMAIL_HOME).", file=sys.stderr)
+    sys.exit(1)
 h = os.environ["HOME_DIR"]
 open(os.path.join(h, "key"), "w").write(d["api_key"]); os.chmod(os.path.join(h, "key"), 0o600)
 open(os.path.join(h, "inbox"), "w").write(d["inbox_id"])
@@ -39,6 +45,14 @@ case "$cmd" in
 d=json.load(sys.stdin)
 if d.get("inbox_id"): print(d["inbox_id"])
 else: print("agentmail: API rejected the key/inbox:", d, file=sys.stderr); sys.exit(1)';;
+  add-inbox) user="${1:-}"; dir="${2:-}"; [ -n "$user" ] && [ -n "$dir" ] || { echo "usage: agentmail add-inbox USERNAME DIR" >&2; exit 2; }
+    mkdir -p "$dir"; chmod 700 "$dir"
+    call -X POST "$api/v0/inboxes" -d "{\"username\":\"$user\"}" | KEY="$key" DIR="$dir" python3 -c 'import json,sys,os
+d=json.load(sys.stdin)
+if not d.get("inbox_id"): print("agentmail add-inbox failed:", d.get("message") or d.get("error") or d, file=sys.stderr); sys.exit(1)
+p=os.environ["DIR"]; open(os.path.join(p,"key"),"w").write(os.environ["KEY"]); os.chmod(os.path.join(p,"key"),0o600)
+open(os.path.join(p,"inbox"),"w").write(d["inbox_id"])
+print("inbox:", d["inbox_id"], "— written to", p, "(shares this org'"'"'s API key; use AGENTMAIL_HOME=" + p + ")")';;
   verify) [ -n "${1:-}" ] || { echo "usage: agentmail verify CODE" >&2; exit 2; }
     call -X POST "$api/v0/agent/verify" -d "{\"otp_code\":\"$1\"}" | python3 -c 'import json,sys
 d=json.load(sys.stdin)
