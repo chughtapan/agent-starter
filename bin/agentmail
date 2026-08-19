@@ -76,7 +76,9 @@ if os.environ["SUBJ"]: b["subject"]=os.environ["SUBJ"]
 if os.environ["LABELS"]: b["labels"]=[x for x in os.environ["LABELS"].split(",") if x]
 print(json.dumps(b))' "$file")
     if [ "$cmd" = send ]; then call -X POST "$api/v0/inboxes/$inbox/messages/send" -d "$body"
-    else [ -n "$mid" ] || { echo "agentmail: --message-id required" >&2; exit 2; }; call -X POST "$api/v0/inboxes/$inbox/messages/$mid/reply" -d "$body"; fi;;
+    else [ -n "$mid" ] || { echo "agentmail: --message-id required" >&2; exit 2; }
+      mid_enc=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$mid")
+      call -X POST "$api/v0/inboxes/$inbox/messages/$mid_enc/reply" -d "$body"; fi;;
   label)
     tid="$1"; shift; add=""; rem=""
     while [ $# -gt 0 ]; do case "$1" in --add) add="$2"; shift 2;; --remove) rem="$2"; shift 2;; *) shift;; esac; done
