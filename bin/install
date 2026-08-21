@@ -3,6 +3,8 @@
 #   · ~/.agentmail/inbox            ← AGENT_EMAIL from AGENTS.md (the brief needs it)
 #   · ~/.claude/settings.json hooks ← bin/agent-brief on SessionStart, UserPromptSubmit, PostToolUse
 #   · user-scope MCP server `agentmail` ← bin/agentmail-mcp (any session can act on mail; no key in config)
+#   · macOS: ~/.agentmail/<name>.app  ← osacompile'd notifier applet (notifications carry the agent's name + 📬)
+#   · macOS: launchd LaunchAgent      ← bin/agent-cron every 15 min (unattended inbox pass; Linux: crontab line)
 # `install --check` prints "installed" / "not installed" and exits 0/1.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
@@ -35,7 +37,16 @@ for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
 tmp=p+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,p)
 PY
   command -v claude >/dev/null 2>&1 && claude mcp remove --scope user agentmail >/dev/null 2>&1 || true
-  echo "uninstalled (hooks + user-scope bridge removed; ~/.agentmail and the inbox untouched)"; exit 0
+  if [ "$(uname)" = Darwin ]; then
+    for pl in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
+      [ -e "$pl" ] || continue
+      launchctl bootout "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true; rm -f "$pl"
+    done
+    rm -rf "$home"/*.app
+  else
+    crontab -l 2>/dev/null | grep -v "bin/agent-cron" | crontab - 2>/dev/null || true
+  fi
+  echo "uninstalled (hooks, user-scope bridge, notifier applet and background pass removed; ~/.agentmail and the inbox untouched)"; exit 0
 fi
 
 if [ "${1:-}" = "--check" ]; then
@@ -76,5 +87,43 @@ if command -v claude >/dev/null 2>&1; then
   else (cd "$HOME" && claude mcp add --scope user --transport stdio agentmail -- "$here/agentmail-mcp" >/dev/null) && echo "mcp: agentmail registered (user scope)"; fi
 else
   echo "mcp: claude CLI not found — run: claude mcp add --scope user --transport stdio agentmail -- $here/agentmail-mcp"
+fi
+# 4. notifier applet + background pass (skipped in tests via AGENT_INSTALL_NO_CRON)
+name="${email%%@*}"
+if [ -n "${AGENT_INSTALL_NO_CRON:-}" ]; then
+  echo "cron: skipped (AGENT_INSTALL_NO_CRON)"
+elif [ "$(uname)" = Darwin ] && [ -n "$email" ] && ! printf '%s' "$email" | grep -q '{{'; then
+  app="$home/$name.app"
+  if command -v osacompile >/dev/null 2>&1; then
+    if [ ! -d "$app" ] || [ "$repo/assets/notifier.applescript" -nt "$app" ]; then
+      rm -rf "$app"
+      osacompile -o "$app" "$repo/assets/notifier.applescript" >/dev/null 2>&1 &&         cp "$repo/assets/agent-brief.icns" "$app/Contents/Resources/applet.icns" 2>/dev/null &&         touch "$app" && echo "notifier: $name.app built (notifications appear as $name)" || echo "notifier: applet build failed — plain osascript fallback stays"
+    else echo "notifier: $name.app present"; fi
+  else echo "notifier: osacompile not found — plain osascript fallback stays"; fi
+  pl="$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist"
+  claude_path=$(command -v claude || true)
+  mkdir -p "$(dirname "$pl")"
+  cat > "$pl" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>to.agentmail.$name.inbox</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$here/agent-cron</string></array>
+  <key>StartInterval</key><integer>900</integer>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>${claude_path:+$(dirname "$claude_path"):}/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardErrorPath</key><string>$home/cron.err</string>
+</dict></plist>
+PLIST
+  launchctl bootout "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true
+  if launchctl bootstrap "gui/$(id -u)" "$pl" >/dev/null 2>&1 || launchctl load -w "$pl" >/dev/null 2>&1; then
+    echo "cron: unattended inbox pass every 15 min (launchd, $name)"
+  else
+    echo "cron: could not load launchd job — run: launchctl bootstrap gui/\$(id -u) $pl"
+  fi
+elif [ "$(uname)" != Darwin ] && command -v crontab >/dev/null 2>&1; then
+  ( crontab -l 2>/dev/null | grep -v "bin/agent-cron"; echo "*/15 * * * * $here/agent-cron" ) | crontab - 2>/dev/null \
+    && echo "cron: unattended inbox pass every 15 min (crontab)" || echo "cron: crontab not writable — add: */15 * * * * $here/agent-cron"
 fi
 echo installed

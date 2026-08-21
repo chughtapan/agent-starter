@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# agent-notify TITLE BODY — local desktop notification, attributed to the agent.
+# macOS: posts through the per-agent applet ~/.agentmail/<name>.app (built by bin/install
+# with osacompile; notifications then carry the agent's name and the 📬 icon). Text is
+# handed over via a UTF-8 file — argv/env would be re-encoded. Falls back to plain
+# osascript (argv form, UTF-8-safe) when the applet is missing; Linux uses notify-send.
+# Silent no-op on any failure or when AGENT_BRIEF_NO_NOTIFY is set.
+set -u
+[ -n "${AGENT_BRIEF_NO_NOTIFY:-}" ] && exit 0
+title="${1:-}"; body="${2:-}"; [ -n "$title" ] || exit 0
+home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
+if [ "$(uname)" = Darwin ]; then
+  app=$(ls -d "$home"/*.app 2>/dev/null | head -1)
+  if [ -n "$app" ] && [ -x "$app/Contents/MacOS/applet" ]; then
+    printf '%s\n%s\n' "$title" "$body" > "$home/notify.txt"
+    open -gj "$app" >/dev/null 2>&1 && exit 0
+  fi
+  command -v osascript >/dev/null 2>&1 && \
+    osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' "$title" "$body" >/dev/null 2>&1
+elif command -v notify-send >/dev/null 2>&1; then
+  notify-send "$title" "$body" >/dev/null 2>&1
+fi
+exit 0

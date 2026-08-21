@@ -47,5 +47,7 @@ check "onboard skill never types keys" "grep -qi 'never ask the owner for a key'
 check ".mcp.json wires bin/agentmail-mcp" "python3 -c \"import json; d=json.load(open('.mcp.json')); assert d['mcpServers']['agentmail']['command']=='bin/agentmail-mcp'\""
 check "agentmail-mcp wrapper executable and key-free" "[ -x bin/agentmail-mcp ] && ! grep -qE 'am_[A-Za-z0-9_]{10,}' bin/agentmail-mcp .mcp.json README.md"
 tcheck "README says the agent registers its own inbox" "grep -q 'registers its own inbox' README.md"
+tcheck "agent-cron dry mode is safe" "AGENT_CRON_DRY=1 AGENTMAIL_HOME=/nonexistent bin/agent-cron >/dev/null"
+tcheck "agent-notify is silent without a display stack" "AGENT_BRIEF_NO_NOTIFY=1 bin/agent-notify t b"
 
 exit $fail

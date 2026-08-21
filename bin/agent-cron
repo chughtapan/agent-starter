@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# agent-cron — the unattended inbox pass, run every 15 min by launchd (bin/install).
+# Cheap pre-check first (one API call); only when there is unprocessed mail does it run
+# `claude -p --permission-mode auto` on the inbox skill. Auto mode approves the safe rows;
+# anything that would have prompted is denied and ends up labelled needs-human by the
+# skill's own fallback. A desktop notification (bin/agent-notify) fires ONLY when
+# something still needs the human after the pass; a clean pass is silent — the next
+# session brief reports "handled N". Lockfile against overlap; 1 h backoff after a
+# failed claude run. AGENT_CRON_DRY=1 stops before any network or claude call.
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
+home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
+api="${AGENTMAIL_API:-https://api.agentmail.to}"
+state="$home/cron-state.json"; lock="$home/cron.lock"; log="$home/cron.log"
+[ -n "${AGENT_CRON_DRY:-}" ] && { echo "dry: would check $api for $(cat "$home/inbox" 2>/dev/null || echo '<no inbox>')"; exit 0; }
+key=$(tr -d '[:space:]' 2>/dev/null < "$home/key") || exit 0
+inbox=$(tr -d '[:space:]' 2>/dev/null < "$home/inbox") || exit 0
+[ -n "$key" ] && [ -n "$inbox" ] || exit 0
+
+if ! mkdir "$lock" 2>/dev/null; then   # stale after 30 min
+  age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || date +%s) ))
+  [ "$age" -lt 1800 ] && exit 0
+  rm -rf "$lock"; mkdir "$lock" 2>/dev/null || exit 0
+fi
+trap 'rm -rf "$lock"' EXIT
+
+fetch() { curl -sS -m 20 -H "Authorization: Bearer $key" "$api/v0/inboxes/$inbox/threads?limit=50" 2>/dev/null; }
+count() { # $1 json  $2 mode: new|needs ; prints "N<TAB>first subject — sender"
+  J="$1" M="$2" python3 - <<'PY' 2>/dev/null
+import json, os
+d = json.loads(os.environ["J"]); m = os.environ["M"]; hits = []
+for t in d.get("threads", []):
+    labels = t.get("labels") or []
+    if m == "new" and "processed" not in labels: hits.append(t)
+    if m == "needs" and "needs-human" in labels: hits.append(t)
+if hits:
+    t = hits[0]; s = (t.get("senders") or ["?"])[-1]
+    print(f"{len(hits)}\t{t.get('subject','(no subject)')} ← {s}")
+else: print("0\t")
+PY
+}
+
+json=$(fetch) || exit 0; [ -n "$json" ] || exit 0
+new=$(count "$json" new | cut -f1); [ "$new" -gt 0 ] 2>/dev/null || exit 0
+
+last_fail=$(python3 -c 'import json;print(json.load(open("'"$state"'")).get("fail_ts",0))' 2>/dev/null || echo 0)
+[ $(( $(date +%s) - ${last_fail:-0} )) -lt 3600 ] && exit 0
+
+claude_bin="${AGENT_CRON_CLAUDE:-$(command -v claude || true)}"
+[ -n "$claude_bin" ] || exit 0
+before=$new
+{ echo "=== $(date '+%F %T') pass start ($before unprocessed)"
+  cd "$repo" && AGENT_BRIEF_NO_UPGRADE=1 "$claude_bin" -p --permission-mode auto \
+    "Read AGENTS.md, then run the inbox skill (.claude/skills/inbox/SKILL.md) once, unattended. You are not interactive: no questions, follow the skill's unattended rules exactly."
+} >> "$log" 2>&1
+rc=$?
+tail -c 200000 "$log" > "$log.t" 2>/dev/null && mv "$log.t" "$log"
+
+json=$(fetch) || json=""
+after=0; [ -n "$json" ] && after=$(count "$json" new | cut -f1)
+handled=$(( before - after )); [ "$handled" -lt 0 ] && handled=0
+prev=$(python3 -c 'import json;print(json.load(open("'"$state"'")).get("handled",0))' 2>/dev/null || echo 0)
+python3 -c 'import json,time; json.dump({"ts":int(time.time()),"handled":'"${prev:-0}"'+'"$handled"',"fail_ts":'"$( [ $rc -ne 0 ] && date +%s || echo 0 )"'}, open("'"$state"'","w"))' 2>/dev/null
+
+if [ -n "$json" ]; then
+  needs=$(count "$json" needs); n=$(printf '%s' "$needs" | cut -f1); first=$(printf '%s' "$needs" | cut -f2-)
+  if [ "$n" -gt 0 ] 2>/dev/null; then
+    name="${inbox%%@*}"
+    "$here/agent-notify" "📬 $name: $n need you" "$first"
+  fi
+fi
+exit 0

@@ -10,11 +10,17 @@ Wires this agent into the owner's Claude Code on this machine. Idempotent.
 
 | Invocation | Effect | Prints |
 |---|---|---|
-| `bin/install` | writes `~/.agentmail/inbox` from the `My inbox is **…**` line of `AGENTS.md`; adds `bin/agent-brief` as a `SessionStart`, `UserPromptSubmit` and `PostToolUse` command hook (timeout 10 s) in `~/.claude/settings.json` (re-points the command if the repo moved); registers the user-scope MCP server `agentmail` → `bin/agentmail-mcp` via `claude mcp add --scope user` (checked from `$HOME` so the repo's `.mcp.json` doesn't mask it) | `inbox: …`, `hooks: updated|already present`, `mcp: …`, then `installed` |
+| `bin/install` | writes `~/.agentmail/inbox` from the `My inbox is **…**` line of `AGENTS.md`; adds `bin/agent-brief` as a `SessionStart`, `UserPromptSubmit` and `PostToolUse` command hook (timeout 10 s) in `~/.claude/settings.json` (re-points the command if the repo moved); registers the user-scope MCP server `agentmail` → `bin/agentmail-mcp` via `claude mcp add --scope user` (checked from `$HOME` so the repo's `.mcp.json` doesn't mask it); macOS: `osacompile`s `assets/notifier.applescript` into `~/.agentmail/<name>.app` with `assets/agent-brief.icns` (notifications carry the agent's name + 📬) and loads a launchd LaunchAgent `to.agentmail.<name>.inbox` running `bin/agent-cron` every 900 s (Linux: a crontab line); `AGENT_INSTALL_NO_CRON` skips that step; `--uninstall` removes all of it | `inbox: …`, `hooks: …`, `mcp: …`, `notifier: …`, `cron: …`, then `installed` |
 | `bin/install --check` | true when the three hooks, the user-scope server and `~/.agentmail/inbox` are all present | `installed` (exit 0) or `not installed` (exit 1) |
 | `bin/install --uninstall` | removes the three hooks and the user-scope server; leaves `~/.agentmail/` and the inbox alone | `uninstalled (…)` |
 
 Env: `CLAUDE_SETTINGS` (settings file, default `~/.claude/settings.json`), `AGENTMAIL_HOME` (default `~/.agentmail`).
+
+### `bin/agent-cron`
+The unattended pass, run every 15 min by launchd/cron. Cheap pre-check (one threads call) — no unprocessed mail → silent exit, no tokens. Otherwise runs `claude -p --permission-mode auto` in the agent repo on the inbox skill, unattended: auto mode approves the safe rows; anything that would have prompted is denied and lands as `needs-human`. After the pass: `needs-human` > 0 → one desktop notification via `bin/agent-notify`; 0 → silence. Handled count accumulates in `~/.agentmail/cron-state.json` (the next session brief reports and resets it). Lockfile (30 min stale), 1 h backoff after a failed run, log at `~/.agentmail/cron.log` (200 KB cap). `AGENT_CRON_DRY=1` stops before any network/claude call; `AGENT_CRON_CLAUDE` overrides the binary.
+
+### `bin/agent-notify TITLE BODY`
+Desktop notification attributed to the agent: writes `~/.agentmail/notify.txt` (UTF-8, title/body lines) and opens `~/.agentmail/<name>.app` in the background (`open -gj`). Falls back to plain `osascript` (argv form) without the applet, `notify-send` on Linux. Silent no-op on failure or `AGENT_BRIEF_NO_NOTIFY`.
 
 ### `bin/agent-brief`
 The hook. Reads the hook event JSON on stdin (`hook_event_name`), or runs plainly when invoked by hand.
@@ -59,6 +65,7 @@ Stdio MCP bridge for key mode: sets `AGENTMAIL_API_KEY` from `~/.agentmail/key` 
 | `PROTOCOL.md`, `README.md`, `bin/`, `.claude/`, `docs/`, `test/`, `.mcp.json`, `LICENSE`, `VERSION`, `.agent-kit` | the kit | template | yes |
 | `~/.agentmail/key` (0600), `~/.agentmail/inbox` | key + address for the brief and the bridge | owner (mode A) or `onboard` self-signup (mode B) | — |
 | `~/.agentmail/brief-state.json`, `.brief-stamp`, `.upgrade-stamp` | brief dedupe / throttle, upgrade throttle | `agent-brief`, `agent-upgrade` | — |
+| `~/.agentmail/cron-state.json`, `cron.log`, `cron.lock`, `notify.txt`, `<name>.app` | background-pass state, log, lock; notification handoff; notifier applet | `agent-cron`, `agent-notify`, `install` | — |
 | `~/.claude/settings.json` (three hooks), `~/.claude.json` (user-scope `agentmail`) | machine wiring | `bin/install` | — |
 
 ## Mailbox labels

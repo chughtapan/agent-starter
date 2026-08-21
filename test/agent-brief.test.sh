@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export AGENT_INSTALL_NO_CRON=1
 # Exercises bin/agent-brief (3 hook events, dedupe, throttle, silence), bin/install (idempotent, no key in config),
 # and bin/agent-upgrade against local fixtures. No network.
 set -u; cd "$(dirname "$0")/.."
@@ -35,13 +36,19 @@ assert "question for maya" not in c, ("thread we sent last must not be new", c)
 ' || { echo "FAIL: SessionStart brief: $out"; exit 1; }
 # 2. throttle: immediately again → nothing
 out2=$(ev UserPromptSubmit | bin/agent-brief); [ -z "$out2" ] || { echo "FAIL: not throttled: $out2"; exit 1; }
-# 3. after the interval, same threads → dedupe: nothing new to say
+# 3. after the interval, same threads → new-mail lines are deduped, but the needs-human thread nags again
 echo 0 > "$tmp/am/.brief-stamp"
-out3=$(ev UserPromptSubmit | bin/agent-brief); [ -z "$out3" ] || { echo "FAIL: dedupe failed: $out3"; exit 1; }
-# 4. thread updated → announced again, on PostToolUse with the right event name
-echo 0 > "$tmp/am/.brief-stamp"; python3 -c "import json;p='$tmp/am/brief-state.json';d=json.load(open(p));d['seen']['thr_needs']='old';json.dump(d,open(p,'w'))"
+out3=$(ev UserPromptSubmit | bin/agent-brief)
+echo "$out3" | python3 -c '
+import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "dataset access" in c, ("needs-human must re-appear every brief", c)
+assert "[INTRO] test-agent" not in c, ("new-mail line must be deduped", c)
+' || { echo "FAIL: needs-human nag / dedupe: $out3"; exit 1; }
+# 4. cron handled-count is reported once, then reset
+echo 0 > "$tmp/am/.brief-stamp"; python3 -c "import json;json.dump({'ts':1,'handled':2,'fail_ts':0},open('$tmp/am/cron-state.json','w'))"
 out4=$(ev PostToolUse | bin/agent-brief)
-echo "$out4" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["hookSpecificOutput"]["hookEventName"]=="PostToolUse"; assert "dataset access" in d["hookSpecificOutput"]["additionalContext"]' || { echo "FAIL: PostToolUse re-announce: $out4"; exit 1; }
+echo "$out4" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["hookSpecificOutput"]["hookEventName"]=="PostToolUse"; assert "background pass handled 2" in d["hookSpecificOutput"]["additionalContext"]' || { echo "FAIL: handled line: $out4"; exit 1; }
+python3 -c "import json;assert json.load(open('$tmp/am/cron-state.json'))['handled']==0" || { echo "FAIL: handled not reset"; exit 1; }
 # 5. no key: silent exit 0
 mv "$tmp/am/key" "$tmp/am/key.bak"; out5=$(ev SessionStart | bin/agent-brief); rc=$?
 [ $rc -eq 0 ] && [ -z "$out5" ] || { echo "FAIL: no-key should be silent exit 0"; exit 1; }; mv "$tmp/am/key.bak" "$tmp/am/key"
@@ -49,7 +56,7 @@ mv "$tmp/am/key" "$tmp/am/key.bak"; out5=$(ev SessionStart | bin/agent-brief); r
 rm -f "$tmp/am/brief-state.json" "$tmp/am/.brief-stamp"; out6=$(ev SessionStart | AGENTMAIL_API="http://127.0.0.1:1" bin/agent-brief); rc=$?
 [ $rc -eq 0 ] && [ -z "$out6" ] || { echo "FAIL: api-down should be silent exit 0"; exit 1; }
 # 7. no stdin at all (manual run): still works, plain text
-rm -f "$tmp/am/brief-state.json" "$tmp/am/.brief-stamp"; out7=$(bin/agent-brief </dev/null); echo "$out7" | grep -q 'dataset access' || { echo "FAIL: manual run: $out7"; exit 1; }
+rm -f "$tmp/am/brief-state.json" "$tmp/am/.brief-stamp" "$tmp/am/cron-state.json"; out7=$(bin/agent-brief </dev/null); echo "$out7" | grep -q 'dataset access' || { echo "FAIL: manual run: $out7"; exit 1; }
 
 # 8. install: hooks for 3 events, idempotent, user-scope MCP via a fake `claude`, inbox file from AGENTS.md
 mkdir -p "$tmp/bin" "$tmp/repo"; cp -R bin .claude PROTOCOL.md "$tmp/repo/"; printf '# test-agent\n\n## Who I am\n\n- My inbox is **test-agent@agentmail.to**. It is the only address I send from.\n' > "$tmp/repo/AGENTS.md"; ln -s AGENTS.md "$tmp/repo/CLAUDE.md"

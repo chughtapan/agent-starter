@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # agent-brief — Claude Code hook (SessionStart / UserPromptSubmit / PostToolUse):
-# tell the human, inside the session, when their agent's inbox has something new
-# for them, and offer to work through it. Silent when nothing is new. Throttled
-# (default 5 min) and deduplicated by thread, so it never repeats itself.
-# Also raises a local desktop notification for a new brief, and on SessionStart runs
-# the daily kit upgrade check (bin/agent-upgrade).
+# tell the human, inside the session, when their agent's inbox has something new or still
+# waiting on them, and offer to work through it. Silent when nothing is new; new-mail
+# lines are deduplicated by thread, but needs-human threads re-appear in every brief
+# until cleared. Reports what the background pass (bin/agent-cron) handled. Desktop
+# notifications are agent-cron's job. On SessionStart runs the daily kit upgrade
+# check (bin/agent-upgrade). Throttled (default 5 min).
 # Never blocks a session: any failure exits 0 with no output.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -62,23 +63,34 @@ need, fresh = [], []
 for t in d.get("threads", []):
     labels = set(t.get("labels") or [])
     tid = t.get("thread_id"); stamp = t.get("updated_at") or t.get("timestamp") or ""
+    if "needs-human" in labels:            # waiting on the human: re-listed every brief until cleared
+        need.append(t); seen[tid] = stamp
+        continue
     if seen.get(tid) == stamp:
         continue
     # "new" = the last message in the thread was received (not sent by us) and the pass hasn't seen it
     rcv = t.get("received_timestamp") or ""; snt = t.get("sent_timestamp") or ""
     last_was_received = bool(rcv) and (not snt or rcv > snt)
-    if "needs-human" in labels:
-        need.append(t)
-    elif last_was_received and "processed" not in labels:
+    if last_was_received and "processed" not in labels:
         fresh.append(t)
     seen[tid] = stamp
 st["seen"] = seen; st["last_check"] = now
 os.makedirs(os.path.dirname(state_path), exist_ok=True)
 json.dump(st, open(state_path, "w"))
-if not need and not fresh:
+handled = 0
+cron_state = os.path.join(os.path.dirname(state_path), "cron-state.json")
+try:
+    cs = json.load(open(cron_state)); handled = int(cs.get("handled", 0))
+    if handled:
+        cs["handled"] = 0; json.dump(cs, open(cron_state, "w"))
+except Exception:
+    handled = 0
+if not need and not fresh and not handled:
     sys.exit(0)
 name = me.split("@")[0]
 lines = [f"📬 {name}: {len(need)} need you, {len(fresh)} new since last check"]
+if handled:
+    lines.append(f"  · background pass handled {handled} thread(s) since your last brief")
 for t in need[:3]:
     lines.append(f"  · needs you: {t.get('subject') or '(no subject)'} ← {addr((t.get('senders') or ['?'])[0])}")
 def last_sender(t):
@@ -96,15 +108,7 @@ lines.append(f"  If the user is not mid-task, offer once: \"want me to work thro
 print("\n".join(lines))
 PY
 )
-# local push: one notification per new brief (macOS / freedesktop), never in tests
-if [ -n "$brief" ] && [ -z "${AGENT_BRIEF_NO_NOTIFY:-}" ]; then
-  first=$(printf '%s\n' "$brief" | head -1); second=$(printf '%s\n' "$brief" | sed -n 2p | sed 's/^ *· *//')
-  if command -v osascript >/dev/null 2>&1; then
-    T="$first" S="$second" osascript -e 'display notification (system attribute "S") with title (system attribute "T")' >/dev/null 2>&1 || true
-  elif command -v notify-send >/dev/null 2>&1; then
-    notify-send "$first" "$second" >/dev/null 2>&1 || true
-  fi
-fi
+# desktop notifications are bin/agent-cron's job (after its pass); the session brief stays in-session
 text="$brief"
 if [ -n "$upgrade_note" ]; then text="${upgrade_note}${text:+
 $text}"; fi

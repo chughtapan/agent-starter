@@ -69,12 +69,16 @@ you ──── talk / approve ────▶ your agent (Claude Code, this re
 
 | When | How | What |
 |---|---|---|
-| Any Claude session on your laptop starts, and then every 5 minutes while you work (on your prompts and tool calls) | one short brief in the session, plus a desktop notification | "📬 <name>: 1 needs you, 2 new — dataset access ← maya-agent" and an offer: *want me to work through them?* — yes → it runs the inbox pass in a subagent, from whatever project you're in |
-| You're away and an unattended pass ran (only if you set one up — a Desktop *local* scheduled task, for example) | email from your agent, subject `[NEEDS YOU] …` | thread, what it proposes |
+| Every 15 minutes while your laptop is awake | nothing, usually — a background pass (launchd → `claude -p`, permission mode `auto`) works the inbox on its own | routine mail gets answered, filed and labelled; only what genuinely needs you is left |
+| That pass leaves something for you | one desktop notification, from an app named after your agent (📬 icon) | "📬 <name>: 2 need you — dataset access ← maya-agent" |
+| Any Claude session on your laptop starts, and then every 5 minutes while you work | one short brief in the session | outstanding *needs you* items (re-listed until you clear them), what's new, "background pass handled N", and an offer: *want me to work through them?* |
+| You're away | email from your agent, subject `[NEEDS YOU] …` | thread, what it proposes |
 | Interactive session with Remote Control on | push on your phone | permission prompts and decisions |
 
-The brief only mentions each thread once (it remembers what it told you),
-says nothing when nothing changed, and never blocks a session.
+The brief mentions new mail once, but anything waiting on you re-appears in
+every brief until it's handled; it says nothing when nothing changed and never
+blocks a session. Desktop notifications come only from the background pass,
+only when something needs you.
 
 ## Talking to your agent
 
@@ -107,10 +111,9 @@ matter to you:
 signed "an AI agent run by <you>". Your address only ever appears as a
 recipient or CC.
 
-**What runs when my laptop is closed?** Nothing. Mail waits in the inbox;
-the next session you open catches you up. If you want unattended passes,
-a Claude Desktop *local* scheduled task ("run the inbox skill hourly") does
-it while the machine is awake — still your machine, nothing in the cloud.
+**What runs when my laptop is closed?** Nothing. The 15-minute background
+pass is a launchd job on your machine — asleep or off means mail just waits,
+and the next pass or session catches up. Nothing in the cloud.
 
 **Where is its memory?** In the mailbox: every thread carries labels
 (`processed`, `replied`, `needs-human`) that say what state it is
@@ -119,9 +122,8 @@ in. On your laptop Claude Code's auto-memory adds notes from sessions.
 **What does it cost?** AgentMail free tier. Sessions draw on your Claude plan
 as usual.
 
-**How do I turn it off?** Remove the three `bin/agent-brief` hooks from
-`~/.claude/settings.json` (or `bin/install --uninstall`). The inbox just
-accumulates.
+**How do I turn it off?** `bin/install --uninstall` — removes the hooks, the
+launchd background pass and the notifier applet. The inbox just accumulates.
 
 **Can I change how it behaves?** Yes — `AGENTS.md` is yours (`CLAUDE.md` is a
 symlink to it, so Claude Code reads the same file). Keep the PROTOCOL rules;
