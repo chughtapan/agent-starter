@@ -40,18 +40,13 @@ counts as answered. Ask the rest in **one** message:
 Wait for the answer, then continue without further stops.
 
 **2. Repo** — check: the current directory is a repo created from the template
-(`.agent-kit` and `AGENTS.md` exist). If not, two ways, both fine:
-- **With `gh`** (installed and logged in):
-  `gh repo create <name> --template chughtapan/agent-starter --private --clone`,
-  then `cd <name>`. If the clone came back empty (template repos can take a
-  few seconds to populate), wait 5 s and `git pull`. Confirm `git remote -v`
-  shows GitHub.
-- **Without `gh`** (no GitHub CLI, or no GitHub account — GitHub is optional):
-  `git clone --depth 1 https://github.com/chughtapan/agent-starter <name> &&
-  cd <name> && rm -rf .git && git init -b main && git add -A && git commit -m
-  "agent-starter template"`. The agent lives in a plain local git repo; tell
-  the owner once that a remote can be added any time later and everything
-  works without one.
+(`.agent-kit` and `AGENTS.md` exist). If not, one flow:
+`git clone --depth 1 https://github.com/chughtapan/agent-starter <name> &&
+cd <name> && rm -rf .git && git init -b main && git add -A && git commit -m
+"agent-starter template"`. Then, only if `gh` is installed and logged in,
+make it a private GitHub repo: `gh repo create <name> --private --source .
+--push`. No `gh`, no GitHub account → skip that; the agent lives in a plain
+local git repo and a remote can be added any time later.
 
 **3. AgentMail** — check: `bin/agentmail whoami` prints an address (or
 `list_inboxes` works via MCP).

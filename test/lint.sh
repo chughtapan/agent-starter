@@ -9,7 +9,7 @@ if grep -q '{{AGENT_NAME}}' AGENTS.md 2>/dev/null; then TEMPLATE=1; else TEMPLAT
 tcheck() { [ "$TEMPLATE" = 1 ] && check "$@" || true; }
 
 tcheck "README leads with the tell-your-Claude message" \
-  "grep -q '^## Install — tell your Claude' README.md && grep -q 'gh repo create <myname>-agent --template chughtapan/agent-starter' README.md"
+  "grep -q '^## Install — tell your Claude' README.md && grep -q 'clone https://github.com/chughtapan/agent-starter into' README.md"
 tcheck "README never sends mail as a human" \
   "! grep -qiE 'gmail connector|from your (own )?email' README.md"
 
