@@ -94,12 +94,31 @@ if [ -n "${AGENT_INSTALL_NO_CRON:-}" ]; then
   echo "cron: skipped (AGENT_INSTALL_NO_CRON)"
 elif [ "$(uname)" = Darwin ] && [ -n "$email" ] && ! printf '%s' "$email" | grep -q '{{'; then
   app="$home/$name.app"
-  if command -v osacompile >/dev/null 2>&1; then
-    if [ ! -d "$app" ] || [ "$repo/assets/notifier.applescript" -nt "$app" ]; then
-      rm -rf "$app"
-      osacompile -o "$app" "$repo/assets/notifier.applescript" >/dev/null 2>&1 &&         cp "$repo/assets/agent-brief.icns" "$app/Contents/Resources/applet.icns" 2>/dev/null &&         touch "$app" && echo "notifier: $name.app built (notifications appear as $name)" || echo "notifier: applet build failed — plain osascript fallback stays"
+  if command -v swiftc >/dev/null 2>&1; then
+    if [ ! -x "$app/Contents/MacOS/notifier" ] || [ "$repo/assets/notifier.swift" -nt "$app/Contents/MacOS/notifier" ]; then
+      rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+      cp "$repo/assets/agent-brief.icns" "$app/Contents/Resources/agent.icns" 2>/dev/null || true
+      cat > "$app/Contents/Info.plist" <<INFOPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>to.agentmail.$name.notifier</string>
+  <key>CFBundleName</key><string>$name</string>
+  <key>CFBundleExecutable</key><string>notifier</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>agent</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+INFOPLIST
+      if swiftc -O -o "$app/Contents/MacOS/notifier" "$repo/assets/notifier.swift" >/dev/null 2>&1 \
+         && codesign --force --sign - "$app" >/dev/null 2>&1; then
+        echo "notifier: $name.app built (notifications appear as $name)"
+        open -n "$app" --args "📬 $name" "notifications are set up — macOS may ask you to allow them once" >/dev/null 2>&1 || true
+      else
+        rm -rf "$app"; echo "notifier: build failed — plain osascript fallback stays"
+      fi
     else echo "notifier: $name.app present"; fi
-  else echo "notifier: osacompile not found — plain osascript fallback stays"; fi
+  else echo "notifier: swiftc not found (Xcode Command Line Tools) — plain osascript fallback stays"; fi
   pl="$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist"
   claude_path=$(command -v claude || true)
   mkdir -p "$(dirname "$pl")"
