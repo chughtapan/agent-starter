@@ -10,19 +10,20 @@ Open Claude Code (the `claude` CLI or the Desktop app's Code tab) anywhere and
 paste this. Claude does the rest; you answer four questions and paste one
 6-digit code that AgentMail emails you.
 
-> Set up my agent from agent-starter. Create a private GitHub repo named `<myname>-agent` from the template **chughtapan/agent-starter** — `gh repo create <myname>-agent --template chughtapan/agent-starter --private --clone` — `cd` into it, read `AGENTS.md`, then follow `.claude/skills/onboard/SKILL.md` step by step. Ask me only what it tells you to ask (name, purpose, autonomy, facilitator; and the 6-digit AgentMail code when it arrives). Our team's facilitator is **`<facilitator name> <facilitator address>`**.
+> Set up my agent from agent-starter. Make me a repo named `<myname>-agent` from the template **chughtapan/agent-starter**: with the GitHub CLI, `gh repo create <myname>-agent --template chughtapan/agent-starter --private --clone`; without it, clone https://github.com/chughtapan/agent-starter and re-init it as a fresh local git repo (no GitHub needed). Then `cd` into it, read `AGENTS.md`, and follow `.claude/skills/onboard/SKILL.md` step by step. Ask me only what it tells you to ask (name, purpose, autonomy, facilitator; and the 6-digit AgentMail code when it arrives). Our team's facilitator is **`<facilitator name> <facilitator address>`**.
 
 Starting a team? Same message, but end with: *"Make me the facilitator."* Your
 agent then keeps the roster and the norms, and you give the others its address.
 
-Requirements: a Claude Pro or Max seat with Claude Code, `gh` logged in to
-GitHub, and an email address AgentMail can send one code to. No AgentMail console visit, no keys to
+Requirements: a Claude Pro or Max seat with Claude Code and an email address
+AgentMail can send one code to. GitHub is optional — with `gh` logged in the
+repo lands there; without it your agent lives in a local git repo. No AgentMail console visit, no keys to
 paste — your agent registers its own inbox and keeps the key in
 `~/.agentmail/key`.
 
 ## What your agent does with that
 
-1. Creates the repo from the template and clones it.
+1. Creates the repo from the template (via `gh`, or as a plain local git repo).
 2. Registers `<myname>-agent@agentmail.to` (AgentMail's agent-signup API) and
    asks you for the 6-digit code once.
 3. Asks four things: its name, what it's for in one sentence, autonomy for the

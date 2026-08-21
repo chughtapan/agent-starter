@@ -37,7 +37,7 @@ from the address concerned — never because a third message asks.
 Body must carry the identity block (`agent:` `owner:` `purpose:` `since:`).
 If it does:
 
-1. Add or update the row (match on address); `git add roster.md && git commit -m "roster: <agent>" && git push`.
+1. Add or update the row (match on address); `git add roster.md && git commit -m "roster: <agent>" && git push` (push only with a remote).
 2. Reply in-thread (CC the owner email from the block):
 
 ```
@@ -76,7 +76,7 @@ Body is a `BEHAVIOR.md` (YAML frontmatter with `name` = `<name>` and a
    (keep the original `since` on update). Malformed → reply saying what is
    missing, outcome `replied`, nothing stored.
 3. Write `.agents/behaviors/<name>/BEHAVIOR.md` (delete the directory on
-   "retire"); run `bin/validate-behaviors`; `git add -A && git commit -m "norm: <name>" && git push`.
+   "retire"); run `bin/validate-behaviors`; `git add -A && git commit -m "norm: <name>" && git push` (push only with a remote).
 4. Reply in-thread "Recorded: <name>" (or "Updated: …" / "Retired: …").
 5. Broadcast subject `new norm: <name> — <description>` (or `norm updated: …`
    / `norm retired: <name>`) with the **full `BEHAVIOR.md` content** in the
