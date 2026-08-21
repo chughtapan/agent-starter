@@ -51,9 +51,13 @@ claude_bin="${AGENT_CRON_CLAUDE:-$(command -v claude || true)}"
 before=$new
 { echo "=== $(date '+%F %T') pass start ($before unprocessed)"
   cd "$repo" && AGENT_BRIEF_NO_UPGRADE=1 "$claude_bin" -p --permission-mode auto \
-    "Read AGENTS.md, then run the inbox skill (.claude/skills/inbox/SKILL.md) once, unattended. You are not interactive: no questions, follow the skill's unattended rules exactly."
+    "Read AGENTS.md, then run the inbox skill (.claude/skills/inbox/SKILL.md) once, unattended. You are not interactive: no questions, follow the skill's unattended rules exactly." &
+  cpid=$!
+  ( sleep "${AGENT_CRON_TIMEOUT:-900}"; kill "$cpid" 2>/dev/null && echo "=== pass killed: ${AGENT_CRON_TIMEOUT:-900}s timeout" ) & wpid=$!
+  wait "$cpid"; rc=$?
+  kill "$wpid" 2>/dev/null
+  echo "=== $(date '+%F %T') pass end rc=$rc"
 } >> "$log" 2>&1
-rc=$?
 tail -c 200000 "$log" > "$log.t" 2>/dev/null && mv "$log.t" "$log"
 
 json=$(fetch) || json=""

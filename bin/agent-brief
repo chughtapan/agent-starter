@@ -34,6 +34,14 @@ upgrade_note=""
 if [ "$event" = "SessionStart" ] && [ -x "$here/agent-upgrade" ] && [ -z "${AGENT_BRIEF_NO_UPGRADE:-}" ]; then
   upgrade_note=$(AGENT_KIT_UPGRADE_INTERVAL="${AGENT_BRIEF_UPGRADE_INTERVAL:-86400}" "$here/agent-upgrade" --if-due 2>/dev/null || true)
 fi
+# self-heal: if the background pass's LaunchAgent got unloaded (reboots, bootouts), quietly reload it
+if [ "$event" = "SessionStart" ] && [ "$(uname)" = Darwin ] && [ -z "${AGENT_BRIEF_NO_NOTIFY:-}" ]; then
+  for pl in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
+    [ -e "$pl" ] || continue
+    lbl=$(basename "$pl" .plist)
+    launchctl print "gui/$(id -u)/$lbl" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true
+  done
+fi
 
 [ -r "$key_file" ] && [ -r "$inbox_file" ] || { emit "$upgrade_note"; exit 0; }
 now=$(date +%s)
