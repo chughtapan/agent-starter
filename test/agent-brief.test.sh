@@ -66,7 +66,7 @@ rm -f "$tmp/am/.brief-stamp"; out7=$(ev SessionStart | AGENTMAIL_API="http://127
 # 8. AGENT_BRIEF_SKIP (set by the cron) → nothing at all
 out8=$(ev SessionStart | AGENT_BRIEF_SKIP=1 bin/agent-brief); [ -z "$out8" ] || { echo "FAIL: skip: $out8"; exit 1; }
 
-# 9. install: hooks for 3 events, idempotent, user-scope MCP via a fake `claude`, inbox file from AGENTS.md, --check pieces
+# 9. install: hooks for 3 events (AGENT_INSTALL_NO_CRON also keeps --uninstall away from the real LaunchAgents), idempotent, user-scope MCP via a fake `claude`, inbox file from AGENTS.md, --check pieces
 mkdir -p "$tmp/bin" "$tmp/repo"; cp -R bin .claude PROTOCOL.md README.md "$tmp/repo/"; printf '# test-agent\n\n## Who I am\n\n- My inbox is **test-agent@agentmail.to**. It is the only address I send from.\n- Facilitator: **fac-agent** <fac-agent@agentmail.to> — introductions\n' > "$tmp/repo/AGENTS.md"; ln -s AGENTS.md "$tmp/repo/CLAUDE.md"
 cat > "$tmp/bin/claude" <<'FAKE'
 #!/usr/bin/env bash

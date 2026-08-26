@@ -59,14 +59,13 @@ for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
 tmp=p+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,p)
 PY
   c=$(find_claude) && "$c" mcp remove --scope user agentmail >/dev/null 2>&1 || true
-  if [ "$(uname)" = Darwin ]; then
-    for p in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
-      [ -e "$p" ] || continue
-      launchctl bootout "gui/$(id -u)" "$p" >/dev/null 2>&1 || true; rm -f "$p"
-    done
-    rm -rf "$home"/*.app
+  # only THIS agent's background pass and app — never a glob over $HOME (the test suite runs --uninstall)
+  if [ -n "${AGENT_INSTALL_NO_CRON:-}" ] || [ -z "$name" ]; then :
+  elif [ "$(uname)" = Darwin ]; then
+    if [ -e "$pl" ]; then launchctl bootout "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true; rm -f "$pl"; fi
+    rm -rf "$home/$name.app"
   else
-    crontab -l 2>/dev/null | grep -v "bin/agent-cron" | crontab - 2>/dev/null || true
+    crontab -l 2>/dev/null | grep -v "$here/agent-cron" | crontab - 2>/dev/null || true
   fi
   echo "uninstalled (hooks, user-scope bridge, notifier app and background pass removed; ~/.agentmail — key, inbox, state — untouched)"; exit 0
 fi
