@@ -80,11 +80,16 @@ def ago(ts):
     if d < 3600: return f"{d//60} min ago"
     if d < 86400: return f"{d//3600} h ago"
     return time.strftime("%b %-d %H:%M", time.localtime(int(ts)))
+import calendar
 def day(iso):
     try:
-        t = time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"); d = (now - time.mktime(t)) / 86400
-        return "today" if d < 1 else ("yesterday" if d < 2 else time.strftime("%a", t))
+        t = calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S")); lt = time.localtime(t)
+        dd = (time.localtime(now).tm_yday - lt.tm_yday) % 366
+        return "today" if dd == 0 else ("yesterday" if dd == 1 else time.strftime("%a", lt))
     except Exception: return ""
+def subj(t):
+    s = (t.get("subject") or "(no subject)").strip()
+    return s if len(s) <= 72 else s[:69].rstrip() + "…"
 # roster: address -> "agent (Owner)"
 roster = {}
 try:
@@ -94,8 +99,14 @@ try:
             roster[cells[1].lower()] = f"{cells[0]} ({cells[2]})" if cells[2] and cells[2] != "—" else cells[0]
 except Exception: pass
 def addr(s): return s.split("<")[-1].rstrip(">").strip().lower()
+owner = ""
+try:
+    m = re.search(r"run by \*\*[^*]+\*\* <([^>]+)>", open(os.path.join(repo, "AGENTS.md")).read()); owner = m.group(1).strip().lower() if m else ""
+except Exception: pass
 def who(s):
-    a = addr(s); return roster.get(a) or a.split("@")[0]
+    a = addr(s)
+    if a == owner: return "you"
+    return roster.get(a) or a.split("@")[0]
 def other(t):
     xs = [x for x in (t.get("senders") or []) if addr(x) != me]
     return who(xs[-1]) if xs else "?"
@@ -156,9 +167,9 @@ else:
 lines = [head]
 def cap(xs, n): return xs if show_all else xs[:n]
 if fetched:
-    for t in cap(need, 3): lines.append(f"  · needs you: {t.get('subject') or '(no subject)'} ← {other(t)}")
-    for t in cap(wait, 3): lines.append(f"  · waiting for a pass: {t.get('subject') or '(no subject)'} ← {other(t)} · since {day(t.get('received_timestamp') or '')}".rstrip(" · since"))
-    for t in cap(reply, 3): lines.append(f"  · reply to you: {t.get('subject') or '(no subject)'} ← {other(t)}")
+    for t in cap(need, 3): lines.append(f"  · needs you: {subj(t)} ← {other(t)}")
+    for t in cap(wait, 3): lines.append(f"  · waiting for a pass: {subj(t)} ← {other(t)} · since {day(t.get('received_timestamp') or '')}".rstrip(" · since"))
+    for t in cap(reply, 3): lines.append(f"  · reply to you: {subj(t)} ← {other(t)}")
     for t in cap(intro, 1): lines.append(f"  · waiting on {fac.split('<')[0].strip() or 'the facilitator'}: [INTRO] ack (sent {day(t.get('sent_timestamp') or '')})")
     extra = (len(need) + len(wait) + len(reply)) - (min(3, len(need)) + min(3, len(wait)) + min(3, len(reply)))
     if extra > 0 and not show_all: lines.append(f"  · … and {extra} more (say \"queue\")")
