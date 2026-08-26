@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# install — wire this agent into the human's Claude Code on this machine (idempotent):
+# install — wire this agent into the human's machine (idempotent):
 #   · ~/.agentmail/inbox            ← AGENT_EMAIL from AGENTS.md (the brief needs it)
 #   · ~/.claude/settings.json hooks ← bin/agent-brief on SessionStart, UserPromptSubmit, PostToolUse
 #   · user-scope MCP server `agentmail` ← bin/agentmail-mcp (any session can act on mail; no key in config)
-#   · macOS: ~/.agentmail/<name>.app  ← osacompile'd notifier applet (notifications carry the agent's name + 📬)
-#   · macOS: launchd LaunchAgent      ← bin/agent-cron every 15 min (unattended inbox pass; Linux: crontab line)
-# `install --check` prints "installed" / "not installed" and exits 0/1.
+#   · macOS: ~/.agentmail/<name>.app  ← Swift notifier (notifications carry the agent's name; a click opens Claude)
+#   · macOS: launchd LaunchAgent      ← bin/agent-cron every 15 min with the claude CLI pinned (Linux: crontab line)
+# `install --check` prints one line per piece and `installed` / `not installed: <pieces>` (exit 0/1).
+# `install --cron` only (re)writes and loads the background pass. `--uninstall` removes everything but ~/.agentmail.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
 settings="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
 cmd="$here/agent-brief"
+email=$(sed -n 's/.*My inbox is \*\*\([^*]*\)\*\*.*/\1/p' "$repo/AGENTS.md" 2>/dev/null | head -1)
+printf '%s' "$email" | grep -q '{{' && email=""
+name="${email%%@*}"
+pl="$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist"
 
+# the claude CLI: PATH first, then the CLI bundled with Claude Desktop
+find_claude() {
+  command -v claude 2>/dev/null && return 0
+  local c; for c in "$HOME/Library/Application Support/Claude/claude-code"/*/claude.app/Contents/MacOS/claude; do [ -x "$c" ] && { echo "$c"; return 0; }; done
+  return 1
+}
 hooks_ok() { python3 - "$settings" "$cmd" <<'PY'
-import json,os,sys
+import json,sys
 p,cmd=sys.argv[1],sys.argv[2]
 try: d=json.load(open(p))
 except Exception: sys.exit(1)
@@ -22,7 +33,18 @@ for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
 PY
 }
 # checked from $HOME so the repo's own .mcp.json entry does not masquerade as the user-scope one
-mcp_ok() { command -v claude >/dev/null 2>&1 && (cd "$HOME" && claude mcp get agentmail >/dev/null 2>&1); }
+mcp_ok() { local c; c=$(find_claude) || return 1; (cd "$HOME" && "$c" mcp get agentmail >/dev/null 2>&1); }
+pass_state() { # prints: ok | missing | unloaded | no-claude | crontab-missing
+  if [ "$(uname)" = Darwin ]; then
+    [ -e "$pl" ] || { echo missing; return; }
+    launchctl print "gui/$(id -u)/to.agentmail.$name.inbox" >/dev/null 2>&1 || { echo unloaded; return; }
+    local c; c=$(sed -n 's/.*<key>AGENT_CRON_CLAUDE<\/key><string>\([^<]*\)<\/string>.*/\1/p' "$pl" | head -1)
+    [ -n "$c" ] && [ -x "$c" ] || { echo no-claude; return; }
+    echo ok
+  else
+    crontab -l 2>/dev/null | grep -q "bin/agent-cron" && echo ok || echo crontab-missing
+  fi
+}
 
 if [ "${1:-}" = "--uninstall" ]; then
   python3 - "$settings" <<'PY'
@@ -36,34 +58,53 @@ for ev in ("SessionStart","UserPromptSubmit","PostToolUse"):
     d.get("hooks",{})[ev]=[e for e in lst if e.get("hooks")]
 tmp=p+".tmp"; json.dump(d,open(tmp,"w"),indent=2); open(tmp,"a").write("\n"); os.replace(tmp,p)
 PY
-  command -v claude >/dev/null 2>&1 && claude mcp remove --scope user agentmail >/dev/null 2>&1 || true
+  c=$(find_claude) && "$c" mcp remove --scope user agentmail >/dev/null 2>&1 || true
   if [ "$(uname)" = Darwin ]; then
-    for pl in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
-      [ -e "$pl" ] || continue
-      launchctl bootout "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true; rm -f "$pl"
+    for p in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
+      [ -e "$p" ] || continue
+      launchctl bootout "gui/$(id -u)" "$p" >/dev/null 2>&1 || true; rm -f "$p"
     done
     rm -rf "$home"/*.app
   else
     crontab -l 2>/dev/null | grep -v "bin/agent-cron" | crontab - 2>/dev/null || true
   fi
-  echo "uninstalled (hooks, user-scope bridge, notifier applet and background pass removed; ~/.agentmail and the inbox untouched)"; exit 0
+  echo "uninstalled (hooks, user-scope bridge, notifier app and background pass removed; ~/.agentmail — key, inbox, state — untouched)"; exit 0
 fi
 
 if [ "${1:-}" = "--check" ]; then
-  if hooks_ok && mcp_ok && [ -s "$home/inbox" ]; then echo installed; exit 0; else echo "not installed"; exit 1; fi
+  missing=""
+  if hooks_ok; then echo "hooks:            present (SessionStart, UserPromptSubmit, PostToolUse → bin/agent-brief)"; else echo "hooks:            missing — run bin/install"; missing="$missing hooks"; fi
+  if mcp_ok; then echo "bridge:           present (user-scope MCP agentmail)"; else echo "bridge:           missing — run bin/install (needs the claude CLI once)"; missing="$missing bridge"; fi
+  if [ "$(uname)" = Darwin ] && [ -z "${AGENT_INSTALL_NO_CRON:-}" ]; then
+    ns=$(cat "$home/notify-state" 2>/dev/null || echo unknown)
+    if [ -x "$home/$name.app/Contents/MacOS/notifier" ]; then
+      case "$ns" in granted) echo "notifications:    allowed ($name)";; denied) echo "notifications:    NOT allowed — System Settings › Notifications › $name"; missing="$missing notifications";; *) echo "notifications:    app built; not yet allowed or denied (the first one asks)";; esac
+    else echo "notifications:    app missing — run bin/install (needs swiftc)"; missing="$missing notifications"; fi
+  fi
+  ps=$( [ -n "${AGENT_INSTALL_NO_CRON:-}" ] && echo ok || pass_state ); ts=$(python3 -c 'import json,time;d=json.load(open("'"$home/cron-state.json"'"));t=int(d.get("ts") or 0);print(time.strftime("%b %-d %H:%M",time.localtime(t)) if t else "never")' 2>/dev/null || echo never)
+  err=$(python3 -c 'import json;print(json.load(open("'"$home/cron-state.json"'")).get("last_error") or "")' 2>/dev/null || true)
+  case "$ps" in
+    ok) echo "background pass:  running every 15 min · last check $ts${err:+ · last error: $err}";;
+    missing) echo "background pass:  NOT installed — run bin/install --cron"; missing="$missing background-pass";;
+    unloaded) echo "background pass:  NOT running (LaunchAgent not loaded) — run bin/install --cron"; missing="$missing background-pass";;
+    no-claude) echo "background pass:  OFF — needs the claude CLI (Claude Desktop → Settings → Install CLI, or npm i -g @anthropic-ai/claude-code), then bin/install --cron"; missing="$missing background-pass";;
+    crontab-missing) echo "background pass:  NOT installed — run bin/install --cron"; missing="$missing background-pass";;
+  esac
+  [ -s "$home/inbox" ] || { echo "inbox:            ~/.agentmail/inbox missing — run onboard"; missing="$missing inbox"; }
+  if [ -z "$missing" ]; then echo installed; exit 0; else echo "not installed:$missing"; exit 1; fi
 fi
 
 # 1. inbox file from AGENTS.md
-email=$(sed -n 's/.*My inbox is \*\*\([^*]*\)\*\*.*/\1/p' "$repo/AGENTS.md" | head -1)
-if [ -n "$email" ] && ! printf '%s' "$email" | grep -q '{{'; then
-  mkdir -p "$home"; chmod 700 "$home"; printf '%s\n' "$email" > "$home/inbox"; echo "inbox: $email"
-else
-  echo "inbox: AGENTS.md has no filled-in inbox yet (run onboard)"
-fi
+if [ "${1:-}" != "--cron" ]; then
+  if [ -n "$email" ]; then
+    mkdir -p "$home"; chmod 700 "$home"; printf '%s\n' "$email" > "$home/inbox"; echo "inbox: $email"
+  else
+    echo "inbox: AGENTS.md has no filled-in inbox yet (run onboard)"
+  fi
 
-# 2. hooks
-mkdir -p "$(dirname "$settings")"
-python3 - "$settings" "$cmd" <<'PY'
+  # 2. hooks
+  mkdir -p "$(dirname "$settings")"
+  python3 - "$settings" "$cmd" <<'PY'
 import json,os,sys
 p,cmd=sys.argv[1],sys.argv[2]
 d=json.load(open(p)) if os.path.exists(p) else {}
@@ -81,24 +122,27 @@ if changed:
 print("hooks:", "updated" if changed else "already present")
 PY
 
-# 3. user-scope MCP bridge (skip quietly if claude CLI is absent — the Desktop app shares ~/.claude.json once the CLI adds it)
-if command -v claude >/dev/null 2>&1; then
-  if mcp_ok; then echo "mcp: agentmail already registered (user scope)"
-  else (cd "$HOME" && claude mcp add --scope user --transport stdio agentmail -- "$here/agentmail-mcp" >/dev/null) && echo "mcp: agentmail registered (user scope)"; fi
-else
-  echo "mcp: claude CLI not found — run: claude mcp add --scope user --transport stdio agentmail -- $here/agentmail-mcp"
+  # 3. user-scope MCP bridge (the Desktop app reads the same ~/.claude.json)
+  if c=$(find_claude); then
+    if mcp_ok; then echo "bridge: agentmail already registered (user scope)"
+    else (cd "$HOME" && "$c" mcp add --scope user --transport stdio agentmail -- "$here/agentmail-mcp" >/dev/null) && echo "bridge: agentmail registered (user scope)"; fi
+  else
+    echo "bridge: no claude CLI found — sessions use bin/agentmail until one is installed (Claude Desktop → Settings → Install CLI)"
+  fi
 fi
-# 4. notifier applet + background pass (skipped in tests via AGENT_INSTALL_NO_CRON)
-name="${email%%@*}"
+
+# 4. notifier app + background pass (skipped in tests via AGENT_INSTALL_NO_CRON)
+pass_line=""
 if [ -n "${AGENT_INSTALL_NO_CRON:-}" ]; then
-  echo "cron: skipped (AGENT_INSTALL_NO_CRON)"
-elif [ "$(uname)" = Darwin ] && [ -n "$email" ] && ! printf '%s' "$email" | grep -q '{{'; then
+  echo "background pass: skipped (AGENT_INSTALL_NO_CRON)"
+elif [ "$(uname)" = Darwin ] && [ -n "$email" ]; then
   app="$home/$name.app"
-  if command -v swiftc >/dev/null 2>&1; then
-    if [ ! -x "$app/Contents/MacOS/notifier" ] || [ "$repo/assets/notifier.swift" -nt "$app/Contents/MacOS/notifier" ]; then
-      rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-      cp "$repo/assets/agent-brief.icns" "$app/Contents/Resources/agent.icns" 2>/dev/null || true
-      cat > "$app/Contents/Info.plist" <<INFOPLIST
+  if [ "${1:-}" != "--cron" ]; then
+    if command -v swiftc >/dev/null 2>&1; then
+      if [ ! -x "$app/Contents/MacOS/notifier" ] || [ "$repo/assets/notifier.swift" -nt "$app/Contents/MacOS/notifier" ]; then
+        rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+        cp "$repo/assets/agent-brief.icns" "$app/Contents/Resources/agent.icns" 2>/dev/null || true
+        cat > "$app/Contents/Info.plist" <<INFOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -110,17 +154,17 @@ elif [ "$(uname)" = Darwin ] && [ -n "$email" ] && ! printf '%s' "$email" | grep
   <key>LSUIElement</key><true/>
 </dict></plist>
 INFOPLIST
-      if swiftc -O -o "$app/Contents/MacOS/notifier" "$repo/assets/notifier.swift" >/dev/null 2>&1 \
-         && codesign --force --sign - "$app" >/dev/null 2>&1; then
-        echo "notifier: $name.app built (notifications appear as $name)"
-        open -n "$app" --args "📬 $name" "notifications are set up — macOS may ask you to allow them once" >/dev/null 2>&1 || true
-      else
-        rm -rf "$app"; echo "notifier: build failed — plain osascript fallback stays"
-      fi
-    else echo "notifier: $name.app present"; fi
-  else echo "notifier: swiftc not found (Xcode Command Line Tools) — plain osascript fallback stays"; fi
-  pl="$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist"
-  claude_path=$(command -v claude || true)
+        if swiftc -O -o "$app/Contents/MacOS/notifier" "$repo/assets/notifier.swift" >/dev/null 2>&1 \
+           && codesign --force --sign - "$app" >/dev/null 2>&1; then
+          echo "notifications: $name.app built — macOS will ask to allow notifications from $name; that is your agent, allow it"
+          open -n "$app" --args "📬 $name" "notifications are on — a click on one opens Claude Code with \"inbox\"" >/dev/null 2>&1 || true
+        else
+          rm -rf "$app"; echo "notifications: build failed — plain osascript fallback (no click target)"
+        fi
+      else echo "notifications: $name.app present"; fi
+    else echo "notifications: swiftc not found (Xcode Command Line Tools) — plain osascript fallback (no click target)"; fi
+  fi
+  claude_path=$(find_claude || true)
   mkdir -p "$(dirname "$pl")"
   cat > "$pl" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -130,19 +174,34 @@ INFOPLIST
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>$here/agent-cron</string></array>
   <key>StartInterval</key><integer>900</integer>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>${claude_path:+$(dirname "$claude_path"):}/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>AGENT_CRON_CLAUDE</key><string>${claude_path}</string>
+    <key>AGENT_CRON_OPEN</key><string>$( [ -n "$claude_path" ] && printf 'claude-cli://open?cwd=%s&amp;q=inbox' "$repo" || printf 'file:///Applications/Claude.app' )</string>
   </dict>
   <key>StandardErrorPath</key><string>$home/cron.err</string>
 </dict></plist>
 PLIST
   launchctl bootout "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true
   if launchctl bootstrap "gui/$(id -u)" "$pl" >/dev/null 2>&1 || launchctl load -w "$pl" >/dev/null 2>&1; then
-    echo "cron: unattended inbox pass every 15 min (launchd, $name)"
+    if [ -n "$claude_path" ]; then pass_line="background pass: every 15 min while this Mac is awake (launchd, $name)"
+    else pass_line="background pass: OFF — needs the claude CLI (Claude Desktop → Settings → Install CLI, or npm i -g @anthropic-ai/claude-code), then bin/install --cron"; fi
   else
-    echo "cron: could not load launchd job — run: launchctl bootstrap gui/\$(id -u) $pl"
+    pass_line="background pass: could not load the launchd job — run: launchctl bootstrap gui/\$(id -u) $pl"
   fi
+  echo "$pass_line"
+  python3 - "$home/cron-state.json" "$claude_path" <<'PY' 2>/dev/null || true
+import json,sys,time,os
+p,c=sys.argv[1],sys.argv[2]
+try: d=json.load(open(p))
+except Exception: d={}
+d["installed_ts"]=int(time.time()); d["last_error"]="claude CLI not found" if not c else ""
+os.makedirs(os.path.dirname(p),exist_ok=True); json.dump(d,open(p,"w"))
+PY
 elif [ "$(uname)" != Darwin ] && command -v crontab >/dev/null 2>&1; then
-  ( crontab -l 2>/dev/null | grep -v "bin/agent-cron"; echo "*/15 * * * * $here/agent-cron" ) | crontab - 2>/dev/null \
-    && echo "cron: unattended inbox pass every 15 min (crontab)" || echo "cron: crontab not writable — add: */15 * * * * $here/agent-cron"
+  claude_path=$(find_claude || true)
+  ( crontab -l 2>/dev/null | grep -v "bin/agent-cron"; echo "*/15 * * * * AGENT_CRON_CLAUDE=$claude_path $here/agent-cron" ) | crontab - 2>/dev/null \
+    && pass_line="background pass: every 15 min (crontab)" || pass_line="background pass: crontab not writable — add: */15 * * * * $here/agent-cron"
+  [ -z "$claude_path" ] && pass_line="background pass: OFF — needs the claude CLI (npm i -g @anthropic-ai/claude-code), then bin/install --cron"
+  echo "$pass_line"
 fi
-echo installed
+case "$pass_line" in *OFF*|*"could not"*|*"not writable"*) echo "installed (background pass OFF)";; *) echo installed;; esac

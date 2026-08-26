@@ -1,21 +1,38 @@
 #!/usr/bin/env bash
-# agent-cron — the unattended inbox pass, run every 15 min by launchd (bin/install).
-# Cheap pre-check first (one API call); only when there is unprocessed mail does it run
-# `claude -p --permission-mode auto` on the inbox skill. Auto mode approves the safe rows;
-# anything that would have prompted is denied and ends up labelled needs-human by the
-# skill's own fallback. A desktop notification (bin/agent-notify) fires ONLY when
-# something still needs the human after the pass; a clean pass is silent — the next
-# session brief reports "handled N". Lockfile against overlap; 1 h backoff after a
-# failed claude run. AGENT_CRON_DRY=1 stops before any network or claude call.
+# agent-cron — the background pass, run every 15 min by launchd (bin/install; Linux: crontab).
+# Every tick: one cheap API call, state written (`ts`), then only when there is unprocessed mail
+# `claude -p --permission-mode auto` runs the inbox skill unattended (auto mode approves the safe rows;
+# anything that would have prompted lands as needs-human; items needs-human for 4 h get the
+# [NEEDS YOU] mail). Once a day after 17:00 local it runs the digest skill. A desktop notification
+# (bin/agent-notify, clickable) fires when the needs-you set gains a member and again every 4 h while
+# any remain. ~/.agentmail/cron-state.json: ts, handled [{subject,outcome}], last_error, error_ts,
+# needs_ids, last_notified, digest_day, runs_day/runs_today (inbox passes today). Lockfile against overlap (shared with interactive passes);
+# 1 h backoff after a failed claude run. AGENT_CRON_DRY=1 stops before any network or claude call.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
 home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
 api="${AGENTMAIL_API:-https://api.agentmail.to}"
 state="$home/cron-state.json"; lock="$home/cron.lock"; log="$home/cron.log"
+export AGENT_BRIEF_SKIP=1 AGENT_BRIEF_NO_UPGRADE=1
 [ -n "${AGENT_CRON_DRY:-}" ] && { echo "dry: would check $api for $(cat "$home/inbox" 2>/dev/null || echo '<no inbox>')"; exit 0; }
 key=$(tr -d '[:space:]' 2>/dev/null < "$home/key") || exit 0
 inbox=$(tr -d '[:space:]' 2>/dev/null < "$home/inbox") || exit 0
 [ -n "$key" ] && [ -n "$inbox" ] || exit 0
+name="${inbox%%@*}"
+
+st() { # st KEY [VALUE-JSON] — read or set one field in cron-state.json
+  python3 - "$state" "$1" "${2-}" <<'PY' 2>/dev/null
+import json,sys,os
+p,k,v=sys.argv[1],sys.argv[2],sys.argv[3]
+try: d=json.load(open(p))
+except Exception: d={}
+if v=="":
+    x=d.get(k,""); print(json.dumps(x) if isinstance(x,(list,dict)) else x)
+else:
+    d[k]=json.loads(v); os.makedirs(os.path.dirname(p),exist_ok=True); json.dump(d,open(p,"w"))
+PY
+}
+fail() { st last_error "\"$1\""; st error_ts "$(date +%s)"; }
 
 if ! mkdir "$lock" 2>/dev/null; then   # stale after 30 min
   age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || date +%s) ))
@@ -25,52 +42,97 @@ fi
 trap 'rm -rf "$lock"' EXIT
 
 fetch() { curl -sS -m 20 -H "Authorization: Bearer $key" "$api/v0/inboxes/$inbox/threads?limit=50" 2>/dev/null; }
-count() { # $1 json  $2 mode: new|needs ; prints "N<TAB>first subject — sender"
-  J="$1" M="$2" python3 - <<'PY' 2>/dev/null
+classify() { # $1 json → JSON {"new":N,"needs":[{"id","subject","who"}],"labels":{id:[labels]}}
+  J="$1" ME="$inbox" REPO="$repo" python3 - <<'PY' 2>/dev/null
 import json, os
-d = json.loads(os.environ["J"]); m = os.environ["M"]; hits = []
+d = json.loads(os.environ["J"]); me = os.environ["ME"]
+roster = {}
+try:
+    for line in open(os.path.join(os.environ["REPO"], "roster.md")):
+        c = [x.strip() for x in line.strip().strip("|").split("|")]
+        if len(c) >= 3 and "@" in c[1]: roster[c[1].lower()] = c[0]
+except Exception: pass
+def addr(s): return s.split("<")[-1].rstrip(">").strip().lower()
+out = {"new": 0, "needs": [], "labels": {}}
 for t in d.get("threads", []):
-    labels = t.get("labels") or []
-    if m == "new" and "processed" not in labels: hits.append(t)
-    if m == "needs" and "needs-human" in labels: hits.append(t)
-if hits:
-    t = hits[0]; s = (t.get("senders") or ["?"])[-1]
-    print(f"{len(hits)}\t{t.get('subject','(no subject)')} ← {s}")
-else: print("0\t")
+    labels = t.get("labels") or []; out["labels"][t.get("thread_id")] = labels
+    if "processed" not in labels and not ({"unauthenticated","spam","blocked","trash"} & set(labels)): out["new"] += 1
+    if "needs-human" in labels:
+        others = [addr(x) for x in (t.get("senders") or []) if addr(x) != me]
+        who = roster.get(others[-1], others[-1].split("@")[0]) if others else "?"
+        out["needs"].append({"id": t.get("thread_id"), "subject": t.get("subject") or "(no subject)", "who": who})
+print(json.dumps(out))
 PY
 }
 
-json=$(fetch) || exit 0; [ -n "$json" ] || exit 0
-new=$(count "$json" new | cut -f1); [ "$new" -gt 0 ] 2>/dev/null || exit 0
-
-last_fail=$(python3 -c 'import json;print(json.load(open("'"$state"'")).get("fail_ts",0))' 2>/dev/null || echo 0)
-[ $(( $(date +%s) - ${last_fail:-0} )) -lt 3600 ] && exit 0
+json=$(fetch) || { fail "AgentMail unreachable"; exit 0; }; [ -n "$json" ] || { fail "AgentMail unreachable"; exit 0; }
+st ts "$(date +%s)"
+before=$(classify "$json"); [ -n "$before" ] || exit 0
+new=$(printf '%s' "$before" | python3 -c 'import json,sys;print(json.load(sys.stdin)["new"])')
 
 claude_bin="${AGENT_CRON_CLAUDE:-$(command -v claude || true)}"
-[ -n "$claude_bin" ] || exit 0
-before=$new
-{ echo "=== $(date '+%F %T') pass start ($before unprocessed)"
-  cd "$repo" && AGENT_BRIEF_NO_UPGRADE=1 "$claude_bin" -p --permission-mode auto \
-    "Read AGENTS.md, then run the inbox skill (.claude/skills/inbox/SKILL.md) once, unattended. You are not interactive: no questions, follow the skill's unattended rules exactly." &
-  cpid=$!
-  ( sleep "${AGENT_CRON_TIMEOUT:-900}"; kill "$cpid" 2>/dev/null && echo "=== pass killed: ${AGENT_CRON_TIMEOUT:-900}s timeout" ) & wpid=$!
-  wait "$cpid"; rc=$?
-  kill "$wpid" 2>/dev/null
-  echo "=== $(date '+%F %T') pass end rc=$rc"
-} >> "$log" 2>&1
-tail -c 200000 "$log" > "$log.t" 2>/dev/null && mv "$log.t" "$log"
+run_claude() { # $1 prompt — runs claude -p in the repo with a watchdog; returns its rc
+  local cpid wpid rc
+  { echo "=== $(date '+%F %T') $2"
+    cd "$repo" && "$claude_bin" -p --permission-mode auto "$1" & cpid=$!
+    ( sleep "${AGENT_CRON_TIMEOUT:-900}"; kill "$cpid" 2>/dev/null && echo "=== killed: ${AGENT_CRON_TIMEOUT:-900}s timeout" ) & wpid=$!
+    wait "$cpid"; rc=$?
+    kill "$wpid" 2>/dev/null
+    echo "=== $(date '+%F %T') end rc=$rc"
+  } >> "$log" 2>&1
+  tail -c 200000 "$log" > "$log.t" 2>/dev/null && mv "$log.t" "$log"
+  return $rc
+}
 
-json=$(fetch) || json=""
-after=0; [ -n "$json" ] && after=$(count "$json" new | cut -f1)
-handled=$(( before - after )); [ "$handled" -lt 0 ] && handled=0
-prev=$(python3 -c 'import json;print(json.load(open("'"$state"'")).get("handled",0))' 2>/dev/null || echo 0)
-python3 -c 'import json,time; json.dump({"ts":int(time.time()),"handled":'"${prev:-0}"'+'"$handled"',"fail_ts":'"$( [ $rc -ne 0 ] && date +%s || echo 0 )"'}, open("'"$state"'","w"))' 2>/dev/null
-
-if [ -n "$json" ]; then
-  needs=$(count "$json" needs); n=$(printf '%s' "$needs" | cut -f1); first=$(printf '%s' "$needs" | cut -f2-)
-  if [ "$n" -gt 0 ] 2>/dev/null; then
-    name="${inbox%%@*}"
-    "$here/agent-notify" "📬 $name: $n need you" "$first"
+after="$before"
+if [ "$new" -gt 0 ] 2>/dev/null; then
+  if [ -z "$claude_bin" ] || [ ! -x "$claude_bin" ]; then
+    fail "claude CLI not found"
+  else
+    last_fail=$(st error_ts); case "$last_fail" in ''|*[!0-9]*) last_fail=0;; esac
+    if [ $(( $(date +%s) - last_fail )) -ge 3600 ] || [ -z "$(st last_error)" ]; then
+      today_=$(date +%F); [ "$(st runs_day)" = "$today_" ] || { st runs_day "\"$today_\""; st runs_today 0; }
+      rt=$(st runs_today); st runs_today "$(( ${rt:-0} + 1 ))"
+      if run_claude "Read AGENTS.md, then run the inbox skill (.claude/skills/inbox/SKILL.md) once, unattended. You are not interactive: no questions, follow the skill's unattended rules exactly — including the [NEEDS YOU] mail for anything that has needed the owner for 4 hours." "inbox pass ($new unprocessed)"; then
+        st last_error '""'
+      else fail "inbox pass failed (rc≠0, see cron.log)"; fi
+      json=$(fetch) || json=""; [ -n "$json" ] && after=$(classify "$json")
+      # what got handled: threads that were unprocessed before and are processed now
+      handled=$(B="$before" A="$after" python3 -c '
+import json,os
+b=json.loads(os.environ["B"])["labels"]; a=json.loads(os.environ["A"])
+out=[]
+for tid,labels in a["labels"].items():
+    if "processed" in labels and "processed" not in b.get(tid,["processed"]):
+        outcome="replied" if "replied" in labels else ("needs you" if "needs-human" in labels else "filed")
+        subj=next((n["subject"] for n in a["needs"] if n["id"]==tid), None)
+        out.append({"id":tid,"outcome":outcome,"subject":subj or tid[:8]})
+print(json.dumps(out))' 2>/dev/null || echo "[]")
+      prev=$(st handled); [ -n "$prev" ] && [ "$prev" != '""' ] || prev="[]"
+      st handled "$(P="$prev" H="$handled" python3 -c 'import json,os;print(json.dumps(json.loads(os.environ["P"])+json.loads(os.environ["H"])))' 2>/dev/null || echo "$handled")"
+    fi
   fi
+fi
+
+# notifications: when the needs-you set gains a member, and every 4 h while any remain
+needs=$(printf '%s' "$after" | python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["needs"]))')
+n=$(printf '%s' "$needs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
+if [ "$n" -gt 0 ] 2>/dev/null; then
+  known=$(st needs_ids); [ -n "$known" ] && [ "$known" != '""' ] || known="[]"
+  last_n=$(st last_notified); case "$last_n" in ''|*[!0-9]*) last_n=0;; esac
+  gained=$(K="$known" N="$needs" python3 -c 'import json,os;k=set(json.loads(os.environ["K"]));print(sum(1 for x in json.loads(os.environ["N"]) if x["id"] not in k))')
+  if [ "$gained" -gt 0 ] || [ $(( $(date +%s) - last_n )) -ge 14400 ]; then
+    first=$(printf '%s' "$needs" | python3 -c 'import json,sys;x=json.load(sys.stdin)[0];print(f"{x[\"subject\"]} ← {x[\"who\"]} — click to answer")')
+    title="📬 $name: $n need$( [ "$n" = 1 ] && echo s ) you"
+    if "$here/agent-notify" "$title" "$first" "${AGENT_CRON_OPEN:-}"; then st last_notified "$(date +%s)"; fi
+  fi
+fi
+st needs_ids "$(printf '%s' "$needs" | python3 -c 'import json,sys;print(json.dumps([x["id"] for x in json.load(sys.stdin)]))')"
+
+# the daily digest, once, after 17:00 local
+today=$(date +%F); hour=$(date +%H)
+if [ "$hour" -ge 17 ] && [ "$(st digest_day)" != "$today" ] && [ -n "$claude_bin" ] && [ -x "$claude_bin" ]; then
+  st digest_day "\"$today\""
+  run_claude "Read AGENTS.md, then run the digest skill (.claude/skills/digest/SKILL.md) once, unattended: send today's digest to the owner if anything happened; if nothing has been sent for 7 days, send the one-line alive mail. No questions." "digest" || fail "digest failed (see cron.log)"
 fi
 exit 0

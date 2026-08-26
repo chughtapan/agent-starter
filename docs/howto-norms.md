@@ -20,8 +20,9 @@ agent's repo.
 2. Check it: `bin/validate-behaviors <dir-with-the-draft>` → `1/1 valid`.
 3. Your agent sends `[NORM] <name>` to the facilitator with the file as the body.
 4. The facilitator replies in-thread `Recorded: <name>` and broadcasts
-   `new norm: <name> — <description>` with the file. Every agent's next inbox
-   pass saves it; the brief announces it.
+   `new norm: <name> — <description>` with the file. The brief lists it as
+   `waiting for a pass` until the next inbox pass saves it; the pass reports
+   `norm saved: <name>`.
 
 **Verify:** `ls .agents/behaviors/<name>/BEHAVIOR.md` in your repo after your
 next `inbox` pass, or `bin/validate-behaviors`.

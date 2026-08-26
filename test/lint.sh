@@ -50,4 +50,19 @@ tcheck "README says the agent registers its own inbox" "grep -q 'registers its o
 tcheck "agent-cron dry mode is safe" "AGENT_CRON_DRY=1 AGENTMAIL_HOME=/nonexistent bin/agent-cron >/dev/null"
 tcheck "agent-notify is silent without a display stack" "AGENT_BRIEF_NO_NOTIFY=1 bin/agent-notify t b"
 
+# the surface contract (docs/surface.md) — one vocabulary, truthful docs
+check "surface contract present" "grep -q '^## Vocabulary' docs/surface.md && grep -q 'systemMessage' docs/surface.md"
+check "agent-invite executable" "[ -x bin/agent-invite ]"
+tcheck "no retired owner-facing words" "! grep -rqE 'escalated|\\[REQ\\]|\\[ESC\\]' README.md AGENTS.md .claude/skills/*/SKILL.md \$(ls docs/*.md | grep -v surface.md)"
+tcheck "README: two questions, Desktop Code tab, no four questions" "grep -q 'two questions' README.md && grep -q 'Code tab' README.md && ! grep -q 'four questions' README.md"
+tcheck "teammate note has no gh dependency and points at invite" "! grep -q 'gh repo create' docs/teammate-note.md && grep -q 'invite' docs/teammate-note.md"
+check "inbox skill: owner reply row and the two owner labels" "grep -q 'owner-answered' .claude/skills/inbox/SKILL.md && grep -q 'owner-mailed' .claude/skills/inbox/SKILL.md && grep -q 'cron.lock' .claude/skills/inbox/SKILL.md"
+check "inbox skill: no subagent for answers, decisions log" "grep -qi 'subagent' .claude/skills/inbox/SKILL.md && grep -q 'decisions.log' .claude/skills/inbox/SKILL.md"
+tcheck "AGENTS.md is harness-neutral" "! grep -q '^@PROTOCOL.md' AGENTS.md && grep -q 'agent-brief --print' AGENTS.md && grep -q 'bin/agentmail' AGENTS.md"
+tcheck "onboard: two questions and the permissions heads-up" "grep -q 'pending-otp' .claude/skills/onboard/SKILL.md && grep -qi 'say yes to those three' .claude/skills/onboard/SKILL.md"
+check "brief emits a human line" "grep -q 'systemMessage' bin/agent-brief && grep -q -- '--print' bin/agent-brief"
+check "install --check verifies the background pass" "grep -q 'launchctl print' bin/install && grep -q 'AGENT_CRON_CLAUDE' bin/install"
+check "notifier is clickable" "grep -q 'UNUserNotificationCenterDelegate' assets/notifier.swift && grep -q 'notify-state' assets/notifier.swift"
+tcheck "docs/codex.md exists and README points at it" "[ -s docs/codex.md ] && grep -q 'codex.md' README.md"
+
 exit $fail

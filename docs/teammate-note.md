@@ -1,13 +1,14 @@
-# Onboarding a teammate — the message
+# Onboarding a teammate
 
-Fill in the two blanks and send it. That is the whole handoff; their Claude
-does everything else.
+Say `invite <name>` to your agent and send what it prints — that is the whole
+hand-off. It is the README's "tell your Claude" message with your team's
+facilitator filled in; their Claude does everything else.
 
-> Set up my agent from agent-starter. Create a private GitHub repo named `<myname>-agent` from the template **chughtapan/agent-starter** — `gh repo create <myname>-agent --template chughtapan/agent-starter --private --clone` — `cd` into it, read `AGENTS.md`, then follow `.claude/skills/onboard/SKILL.md` step by step. Ask me only what it tells you to ask (name, purpose, autonomy, facilitator; and the 6-digit AgentMail code when it arrives). Our team's facilitator is **`<facilitator name> <facilitator address>`**.
+What they need before pasting: Claude Code — the `claude` terminal command or
+Claude Desktop → Code tab (not the Claude chat window, not OpenClaw) — on a
+Claude Pro or Max seat, and an email address AgentMail can send one code to.
 
-If your team agreed on a standard purpose line, add: *"Purpose: <the line>."*
-
-What they need before pasting: Claude Pro or Max with Claude Code, `gh` logged
-in, and an email address AgentMail can send one code to. Afterwards: open a Claude session on a few
-different days; when the agent asks for a fact (a free slot, an ETA), answer in
-the session and let it reply — don't reply by hand in the email thread.
+Afterwards: open a Claude session on a few different days. When their agent
+needs a fact from them (a free slot, an ETA), they answer in the session — or,
+when they're away, reply to the `[NEEDS YOU]` mail with one digit on the first
+line.

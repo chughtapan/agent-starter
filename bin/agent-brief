@@ -1,124 +1,214 @@
 #!/usr/bin/env bash
-# agent-brief — Claude Code hook (SessionStart / UserPromptSubmit / PostToolUse):
-# tell the human, inside the session, when their agent's inbox has something new or still
-# waiting on them, and offer to work through it. Silent when nothing is new; new-mail
-# lines are deduplicated by thread, but needs-human threads re-appear in every brief
-# until cleared. Reports what the background pass (bin/agent-cron) handled. Desktop
-# notifications are agent-cron's job. On SessionStart runs the daily kit upgrade
-# check (bin/agent-upgrade). Throttled (default 5 min).
-# Never blocks a session: any failure exits 0 with no output.
+# agent-brief — the session brief (docs/surface.md §1). Claude Code hook on SessionStart /
+# UserPromptSubmit / PostToolUse, or `agent-brief --print [--all]` by hand and from Codex.
+# Returns a human line (hook `systemMessage`, painted by Claude Code) plus an instruction for
+# the model (`additionalContext`). SessionStart always speaks and skips the throttle; the other
+# events speak only when something changed. Every item stays listed until its label changes.
+# The status half comes from ~/.agentmail/cron-state.json and launchd. Never blocks a session:
+# any failure exits 0 — with a "couldn't check" line on SessionStart, silently otherwise.
 set -u
-here="$(cd "$(dirname "$0")" && pwd)"
+here="$(cd "$(dirname "$0")" && pwd)"; repo="$(dirname "$here")"
 home="${AGENTMAIL_HOME:-$HOME/.agentmail}"
 api="${AGENTMAIL_API:-https://api.agentmail.to}"
 min="${AGENT_BRIEF_MIN_INTERVAL:-300}"
 key_file="$home/key"; inbox_file="$home/inbox"; state="$home/brief-state.json"; stamp="$home/.brief-stamp"
+[ -n "${AGENT_BRIEF_SKIP:-}" ] && exit 0
 
-# hook input (may be absent when run by hand)
-event=""
-if [ ! -t 0 ]; then
+mode=hook; all=0; event=""; cwd=""
+for a in "$@"; do case "$a" in --print) mode=print;; --all) all=1;; esac; done
+if [ "$mode" = hook ] && [ ! -t 0 ]; then
   input=$(cat 2>/dev/null || true)
   event=$(printf '%s' "$input" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' | head -1)
+  cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 fi
+[ "$mode" = hook ] && [ -z "$event" ] && mode=print   # run by hand with no event: plain text
 
-emit() { # $1 = text; wrap for the hook event, plain when run by hand
+emit() { # $1 human text, $2 model instruction; wraps for the hook event, plain when printing
   [ -n "$1" ] || return 0
-  if [ -n "$event" ]; then
-    EV="$event" TXT="$1" python3 -c 'import json,os; print(json.dumps({"hookSpecificOutput":{"hookEventName":os.environ["EV"],"additionalContext":os.environ["TXT"]}}))'
+  if [ "$mode" = hook ]; then
+    EV="$event" HUMAN="$1" MODEL="$2" python3 -c 'import json,os; print(json.dumps({"systemMessage":os.environ["HUMAN"],"hookSpecificOutput":{"hookEventName":os.environ["EV"],"additionalContext":os.environ["HUMAN"]+"\n"+os.environ["MODEL"]}}))'
   else
     printf '%s\n' "$1"
   fi
 }
 
-upgrade_note=""
-if [ "$event" = "SessionStart" ] && [ -x "$here/agent-upgrade" ] && [ -z "${AGENT_BRIEF_NO_UPGRADE:-}" ]; then
-  upgrade_note=$(AGENT_KIT_UPGRADE_INTERVAL="${AGENT_BRIEF_UPGRADE_INTERVAL:-86400}" "$here/agent-upgrade" --if-due 2>/dev/null || true)
-fi
-# self-heal: if the background pass's LaunchAgent got unloaded (reboots, bootouts), quietly reload it
-if [ "$event" = "SessionStart" ] && [ "$(uname)" = Darwin ] && [ -z "${AGENT_BRIEF_NO_NOTIFY:-}" ]; then
-  for pl in "$HOME/Library/LaunchAgents"/to.agentmail.*.inbox.plist; do
-    [ -e "$pl" ] || continue
-    lbl=$(basename "$pl" .plist)
-    launchctl print "gui/$(id -u)/$lbl" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$pl" >/dev/null 2>&1 || true
-  done
-fi
+name=$(tr -d '[:space:]' < "$inbox_file" 2>/dev/null); name="${name%%@*}"; [ -n "$name" ] || name=agent
+[ -r "$key_file" ] && [ -r "$inbox_file" ] || { [ "$event" = SessionStart ] || [ "$mode" = print ] && emit "📬 $name: not set up on this machine — say \"onboard me\"" ""; exit 0; }
 
-[ -r "$key_file" ] && [ -r "$inbox_file" ] || { emit "$upgrade_note"; exit 0; }
+# throttle (not on SessionStart, not when printing)
 now=$(date +%s)
-last=$(cat "$stamp" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0;; esac   # cheap: PostToolUse runs this on every tool call
-if [ $((now - last)) -lt "$min" ]; then emit "$upgrade_note"; exit 0; fi
+if [ "$event" != SessionStart ] && [ "$mode" = hook ]; then
+  last=$(cat "$stamp" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0;; esac
+  [ $((now - last)) -lt "$min" ] && exit 0
+fi
 mkdir -p "$home"; echo "$now" > "$stamp"
 
-key=$(tr -d '[:space:]' < "$key_file"); inbox=$(tr -d '[:space:]' < "$inbox_file")
-[ -n "$key" ] && [ -n "$inbox" ] || { emit "$upgrade_note"; exit 0; }
-json=$(curl -sS -m 8 -H "Authorization: Bearer $key" "$api/v0/inboxes/$inbox/threads?limit=30" 2>/dev/null) || { emit "$upgrade_note"; exit 0; }
+# presence facts for the status half
+launchd=missing; claude_bin=""
+if [ "$(uname)" = Darwin ]; then
+  pl="$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist"
+  if [ -e "$pl" ]; then
+    launchd=unloaded; launchctl print "gui/$(id -u)/to.agentmail.$name.inbox" >/dev/null 2>&1 && launchd=loaded
+    claude_bin=$(sed -n 's/.*<key>AGENT_CRON_CLAUDE<\/key><string>\([^<]*\)<\/string>.*/\1/p' "$pl" | head -1)
+  fi
+else
+  crontab -l 2>/dev/null | grep -q "bin/agent-cron" && launchd=loaded
+fi
+[ -n "$claude_bin" ] || claude_bin=$(command -v claude || true)
+claude_bin="${AGENT_CRON_CLAUDE:-$claude_bin}"; launchd="${AGENT_BRIEF_PASS_STATE:-$launchd}"   # overrides for tests
+[ -n "$claude_bin" ] && [ ! -x "$claude_bin" ] && claude_bin=""
 
-brief=$(AB_JSON="$json" AB_STATE="$state" AB_NOW="$now" AB_INBOX="$inbox" AB_REPO="$(dirname "$here")" python3 - <<'PY' 2>/dev/null
-import json, os, sys
+key=$(tr -d '[:space:]' < "$key_file"); inbox=$(tr -d '[:space:]' < "$inbox_file")
+json=$(curl -sS -m 8 -H "Authorization: Bearer $key" "$api/v0/inboxes/$inbox/threads?limit=50" 2>/dev/null) || json=""
+
+out=$(AB_JSON="$json" AB_STATE="$state" AB_NOW="$now" AB_INBOX="$inbox" AB_REPO="$repo" AB_EVENT="$event" AB_MODE="$mode" AB_ALL="$all" \
+      AB_LAUNCHD="$launchd" AB_CLAUDE="$claude_bin" AB_HOME="$home" python3 - <<'PY' 2>/dev/null
+import json, os, sys, time, re
+E = os.environ
+now = int(E["AB_NOW"]); me = E["AB_INBOX"]; repo = E["AB_REPO"]; name = me.split("@")[0]
+event = E["AB_EVENT"]; mode = E["AB_MODE"]; show_all = E["AB_ALL"] == "1"; home = E["AB_HOME"]
+def load(p, default):
+    try: return json.load(open(p))
+    except Exception: return default
+st = load(E["AB_STATE"], {}); cs = load(os.path.join(home, "cron-state.json"), {})
+def hm(ts):
+    try: return time.strftime("%H:%M", time.localtime(int(ts)))
+    except Exception: return "?"
+def ago(ts):
+    d = now - int(ts)
+    if d < 90: return "just now"
+    if d < 3600: return f"{d//60} min ago"
+    if d < 86400: return f"{d//3600} h ago"
+    return time.strftime("%b %-d %H:%M", time.localtime(int(ts)))
+def day(iso):
+    try:
+        t = time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"); d = (now - time.mktime(t)) / 86400
+        return "today" if d < 1 else ("yesterday" if d < 2 else time.strftime("%a", t))
+    except Exception: return ""
+# roster: address -> "agent (Owner)"
+roster = {}
 try:
-    d = json.loads(os.environ["AB_JSON"])
-except Exception:
-    sys.exit(0)
-state_path = os.environ["AB_STATE"]; now = int(os.environ["AB_NOW"]); me = os.environ["AB_INBOX"]; repo = os.environ["AB_REPO"]
+    for line in open(os.path.join(repo, "roster.md")):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) >= 3 and "@" in cells[1] and cells[0] not in ("agent", "---"):
+            roster[cells[1].lower()] = f"{cells[0]} ({cells[2]})" if cells[2] and cells[2] != "—" else cells[0]
+except Exception: pass
+def addr(s): return s.split("<")[-1].rstrip(">").strip().lower()
+def who(s):
+    a = addr(s); return roster.get(a) or a.split("@")[0]
+def other(t):
+    xs = [x for x in (t.get("senders") or []) if addr(x) != me]
+    return who(xs[-1]) if xs else "?"
+
+# ---- status half ----
+fac = ""
 try:
-    st = json.load(open(state_path))
-except Exception:
-    st = {}
-seen = st.get("seen", {})
-def addr(s):
-    return s.split("<")[-1].rstrip(">").strip()
-need, fresh = [], []
+    m = re.search(r"Facilitator: \*\*([^*]+)\*\*", open(os.path.join(repo, "AGENTS.md")).read()); fac = m.group(1).strip() if m else ""
+except Exception: pass
+ts = int(cs.get("ts") or 0); err = cs.get("last_error") or ""
+if E["AB_LAUNCHD"] == "missing": status = "background pass NOT installed — say \"status\""
+elif E["AB_LAUNCHD"] == "unloaded": status = f"background pass NOT running since {ago(ts) if ts else '?'} (not loaded) — say \"status\""
+elif not E["AB_CLAUDE"]: status = "background pass OFF — needs the claude CLI — say \"status\""
+elif err: status = f"background pass failed {ago(int(cs.get('error_ts') or ts or now))} ({err}) — say \"status\""
+elif ts and now - ts > 1800: status = f"background pass last ran {ago(ts)}"
+elif ts: status = f"background pass {hm(ts)}"
+else: status = "background pass has not run yet"
+try:
+    if open(os.path.join(home, "notify-state")).read().strip() == "denied": status += " · notifications off"
+except Exception: pass
+
+# ---- items ----
+need, wait, reply, intro, working = [], [], [], [], []
+fetched = bool(E["AB_JSON"])
+try: d = json.loads(E["AB_JSON"]) if fetched else {}
+except Exception: d = {}; fetched = False
 for t in d.get("threads", []):
     labels = set(t.get("labels") or [])
-    tid = t.get("thread_id"); stamp = t.get("updated_at") or t.get("timestamp") or ""
-    if "needs-human" in labels:            # waiting on the human: re-listed every brief until cleared
-        need.append(t); seen[tid] = stamp
-        continue
-    if seen.get(tid) == stamp:
-        continue
-    # "new" = the last message in the thread was received (not sent by us) and the pass hasn't seen it
+    if labels & {"unauthenticated", "spam", "blocked", "trash"}: continue
     rcv = t.get("received_timestamp") or ""; snt = t.get("sent_timestamp") or ""
-    last_was_received = bool(rcv) and (not snt or rcv > snt)
-    if last_was_received and "processed" not in labels:
-        fresh.append(t)
-    seen[tid] = stamp
-st["seen"] = seen; st["last_check"] = now
-os.makedirs(os.path.dirname(state_path), exist_ok=True)
-json.dump(st, open(state_path, "w"))
-handled = 0
-cron_state = os.path.join(os.path.dirname(state_path), "cron-state.json")
+    last_received = bool(rcv) and (not snt or rcv > snt)
+    if "needs-human" in labels: need.append(t); continue
+    if "intro-sent" in labels and "processed" not in labels: intro.append(t); continue
+    if "processed" in labels:
+        if not last_received and snt: working.append(t)
+        continue
+    if last_received: (reply if snt else wait).append(t)
+    elif snt: working.append(t)
+pending = None
 try:
-    cs = json.load(open(cron_state)); handled = int(cs.get("handled", 0))
-    if handled:
-        cs["handled"] = 0; json.dump(cs, open(cron_state, "w"))
-except Exception:
-    handled = 0
-if not need and not fresh and not handled:
+    p = open(os.path.join(home, "pending-otp")).read().split(); pending = (p[0], int(p[1]) if len(p) > 1 else None)
+except Exception: pass
+handled = cs.get("handled") or []
+if isinstance(handled, int): handled = []
+note = ""
+try: note = open(os.path.join(home, ".upgrade-note")).read().strip(); os.remove(os.path.join(home, ".upgrade-note"))
+except Exception: pass
+
+# ---- human line ----
+if not fetched:
+    head = f"📬 {name}: couldn't check mail (network) · last good check {hm(st.get('last_check')) if st.get('last_check') else 'never'}"
+else:
+    parts = []
+    if need: parts.append(f"{len(need)} needs you" if len(need) == 1 else f"{len(need)} need you")
+    if wait: parts.append(f"{len(wait)} waiting for a pass")
+    if reply: parts.append(f"{len(reply)} repl{'y' if len(reply)==1 else 'ies'} to you")
+    head = f"📬 {name}: " + (", ".join(parts) if parts else f"all clear · checked {hm(now)}") + f" · {status}"
+lines = [head]
+def cap(xs, n): return xs if show_all else xs[:n]
+if fetched:
+    for t in cap(need, 3): lines.append(f"  · needs you: {t.get('subject') or '(no subject)'} ← {other(t)}")
+    for t in cap(wait, 3): lines.append(f"  · waiting for a pass: {t.get('subject') or '(no subject)'} ← {other(t)} · since {day(t.get('received_timestamp') or '')}".rstrip(" · since"))
+    for t in cap(reply, 3): lines.append(f"  · reply to you: {t.get('subject') or '(no subject)'} ← {other(t)}")
+    for t in cap(intro, 1): lines.append(f"  · waiting on {fac.split('<')[0].strip() or 'the facilitator'}: [INTRO] ack (sent {day(t.get('sent_timestamp') or '')})")
+    extra = (len(need) + len(wait) + len(reply)) - (min(3, len(need)) + min(3, len(wait)) + min(3, len(reply)))
+    if extra > 0 and not show_all: lines.append(f"  · … and {extra} more (say \"queue\")")
+if pending:
+    lines.append(f"  · waiting on you: 6-digit AgentMail code (sent to {pending[0]} {ago(pending[1]) if pending[1] else ''})".rstrip())
+if show_all and working:
+    lines.append(f"  · working: {len(working)} thread{'s' if len(working)!=1 else ''} where I asked and am waiting for a reply")
+if handled and (event == "SessionStart" or mode == "print"):
+    for h in handled[:3]: lines.append(f"  · handled by the background pass: {h.get('subject','?')} — {h.get('outcome','')}".rstrip(" —"))
+    if len(handled) > 3: lines.append(f"  · … and {len(handled)-3} more handled")
+if note: lines.insert(0, note)
+
+# ---- emit decision ----
+key = json.dumps({"n": sorted(t.get("thread_id") for t in need), "w": sorted(t.get("thread_id") for t in wait),
+                  "r": sorted(t.get("thread_id") for t in reply), "i": len(intro), "p": bool(pending), "s": status, "f": fetched})
+changed = key != st.get("last_key")
+if mode == "hook" and event != "SessionStart" and not changed:
     sys.exit(0)
-name = me.split("@")[0]
-lines = [f"📬 {name}: {len(need)} need you, {len(fresh)} new since last check"]
-if handled:
-    lines.append(f"  · background pass handled {handled} thread(s) since your last brief")
-for t in need[:3]:
-    lines.append(f"  · needs you: {t.get('subject') or '(no subject)'} ← {addr((t.get('senders') or ['?'])[0])}")
-def last_sender(t):
-    # senders is a set-like list; prefer the one that isn't us
-    others = [addr(x) for x in (t.get("senders") or []) if addr(x) != me]
-    return others[-1] if others else "?"
-for t in fresh[:3]:
-    lines.append(f"  · new: {t.get('subject') or '(no subject)'} ← {last_sender(t)}")
-extra = len(need) + len(fresh) - min(3, len(need)) - min(3, len(fresh))
-if extra > 0:
-    lines.append(f"  · … and {extra} more")
-lines.append(f"  If the user is not mid-task, offer once: \"want me to work through them?\" — on yes, run the inbox skill "
-             f"({repo}/.claude/skills/inbox/SKILL.md) in a subagent with cwd {repo}; the AgentMail tools are the user-scope `agentmail` MCP server. "
-             f"Otherwise just say the one line above and carry on.")
-print("\n".join(lines))
+if fetched: st["last_check"] = now
+st["last_key"] = key; st["last_emit"] = now
+if handled and (event == "SessionStart" or mode == "print"):
+    cs["handled"] = []
+    try: json.dump(cs, open(os.path.join(home, "cron-state.json"), "w"))
+    except Exception: pass
+later = st.get("later")
+if event == "SessionStart" and later: st["later"] = 0
+os.makedirs(home, exist_ok=True); json.dump(st, open(E["AB_STATE"], "w"))
+
+model = ("[for the assistant] The line above is already shown to the owner. If anything needs them and they are not mid-task, "
+         "ask once with AskUserQuestion — options: \"Work through them now\" / \"Later (ask again next session)\" / \"Show me the list\" — else prose. "
+         "On \"now\": run the inbox skill in THIS session (the agentmail MCP is user-scope; fall back to bin/agentmail). "
+         "When the owner answers a needs-you item, YOU send it (reply_to_message + update_thread) and print the sent line. "
+         "Never delegate a one-line answer to a subagent. The owner is present: no [NEEDS YOU] mail. "
+         "The owner can say \"inbox\", \"queue\", \"status\", \"why <n>\" at any time. "
+         f"Skill: {repo}/.claude/skills/inbox/SKILL.md, repo: {repo}."
+         + (" On \"Later\": write {\"later\": 1} into " + E["AB_STATE"] + " and do not ask again this session." if (need or wait or reply) else "")
+         + (" The owner said \"Later\" last session: ask exactly once now, then not again." if later else ""))
+print("\x1e".join(["\n".join(lines), model]))
 PY
 )
-# desktop notifications are bin/agent-cron's job (after its pass); the session brief stays in-session
-text="$brief"
-if [ -n "$upgrade_note" ]; then text="${upgrade_note}${text:+
-$text}"; fi
-emit "$text"
+[ -n "$out" ] || exit 0
+human="${out%%$'\x1e'*}"; model="${out#*$'\x1e'}"
+emit "$human" "$model"
+
+# after the brief: kit upgrade check and LaunchAgent self-heal, detached, only in the agent repo
+if [ "$event" = SessionStart ] && [ "$cwd" = "$repo" ] && [ -z "${AGENT_BRIEF_NO_UPGRADE:-}" ] && [ -x "$here/agent-upgrade" ]; then
+  ( AGENT_KIT_UPGRADE_INTERVAL="${AGENT_BRIEF_UPGRADE_INTERVAL:-86400}" "$here/agent-upgrade" --if-due > "$home/.upgrade-note.tmp" 2>/dev/null \
+    && [ -s "$home/.upgrade-note.tmp" ] && mv "$home/.upgrade-note.tmp" "$home/.upgrade-note"; rm -f "$home/.upgrade-note.tmp" ) >/dev/null 2>&1 &
+fi
+if [ "$event" = SessionStart ] && [ "$launchd" = unloaded ] && [ -z "${AGENT_BRIEF_NO_NOTIFY:-}" ]; then
+  ( launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/to.agentmail.$name.inbox.plist" ) >/dev/null 2>&1 &
+fi
 exit 0
