@@ -53,9 +53,9 @@ try:
         if len(c) >= 3 and "@" in c[1]: roster[c[1].lower()] = c[0]
 except Exception: pass
 def addr(s): return s.split("<")[-1].rstrip(">").strip().lower()
-out = {"new": 0, "needs": [], "labels": {}}
+out = {"new": 0, "needs": [], "labels": {}, "subjects": {}}
 for t in d.get("threads", []):
-    labels = t.get("labels") or []; out["labels"][t.get("thread_id")] = labels
+    labels = t.get("labels") or []; out["labels"][t.get("thread_id")] = labels; out["subjects"][t.get("thread_id")] = t.get("subject") or "(no subject)"
     if "processed" not in labels and not ({"unauthenticated","spam","blocked","trash"} & set(labels)): out["new"] += 1
     if "needs-human" in labels:
         others = [addr(x) for x in (t.get("senders") or []) if addr(x) != me]
@@ -105,8 +105,7 @@ out=[]
 for tid,labels in a["labels"].items():
     if "processed" in labels and "processed" not in b.get(tid,["processed"]):
         outcome="replied" if "replied" in labels else ("needs you" if "needs-human" in labels else "filed")
-        subj=next((n["subject"] for n in a["needs"] if n["id"]==tid), None)
-        out.append({"id":tid,"outcome":outcome,"subject":subj or tid[:8]})
+        out.append({"id":tid,"outcome":outcome,"subject":a.get("subjects",{}).get(tid) or tid[:8]})
 print(json.dumps(out))' 2>/dev/null || echo "[]")
       prev=$(st handled); [ -n "$prev" ] && [ "$prev" != '""' ] || prev="[]"
       st handled "$(P="$prev" H="$handled" python3 -c 'import json,os;print(json.dumps(json.loads(os.environ["P"])+json.loads(os.environ["H"])))' 2>/dev/null || echo "$handled")"
