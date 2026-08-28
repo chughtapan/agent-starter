@@ -39,18 +39,23 @@ Durations use positive ISO 8601 time forms such as `PT15M`, `PT1H`, and `PT30S`.
 
 ## Fields
 
-| Field                        | Values                                | Meaning                                             |
-| ---------------------------- | ------------------------------------- | --------------------------------------------------- |
-| `schemaVersion`              | `1`                                   | Persisted configuration contract                    |
-| `polling.interval`           | ISO duration                          | Local mailbox check cadence                         |
-| `updates.profile`            | `compact`, `singleLine`, `detailed`   | Board renderer; only compact is a v0.4 release gate |
-| `updates.staleAfter`         | ISO duration                          | Repeat unchanged board after this time              |
-| `updates.characterSet`       | `auto`, `unicode`, `ascii`            | Text compatibility preference                       |
-| `notifications.enabled`      | Boolean                               | Reserve local notification behavior                 |
-| `notifications.openHost`     | String                                | Preferred host for future notification routing      |
-| `execution.preferredAdapter` | `auto`, `claude`, `codex`, `openClaw` | Default native work surface                         |
-| `adapters.*.mode`            | `auto`, `enabled`, `disabled`         | Detection and installation policy                   |
-| `backup.gitExport`           | `disabled`, `enabled`                 | Optional clean export; off by default               |
+| Field                        | Values                                | Meaning                                        |
+| ---------------------------- | ------------------------------------- | ---------------------------------------------- |
+| `schemaVersion`              | `1`                                   | Persisted configuration contract               |
+| `polling.interval`           | ISO duration                          | Local mailbox check cadence                    |
+| `updates.profile`            | `compact`, `singleLine`, `detailed`   | Reserved renderer choice; v0.4 renders compact |
+| `updates.staleAfter`         | ISO duration                          | Repeat unchanged board after this time         |
+| `updates.characterSet`       | `auto`, `unicode`, `ascii`            | Reserved terminal compatibility preference     |
+| `notifications.enabled`      | Boolean                               | Reserved local notification switch             |
+| `notifications.openHost`     | String                                | Reserved host for future notification routing  |
+| `execution.preferredAdapter` | `auto`, `claude`, `codex`, `openClaw` | Reserved default work-surface preference       |
+| `adapters.*.mode`            | `auto`, `enabled`, `disabled`         | Detection and installation policy              |
+| `backup.gitExport`           | `disabled`, `enabled`                 | Reserved optional export switch                |
+
+In v0.4, runtime behavior reads `polling.interval`, `updates.staleAfter`, and
+`adapters.*.mode`. The other fields are validated and persisted so their future
+behavior can be added without changing the configuration shape, but they do not
+change runtime behavior in this release.
 
 `enabled` does not make an absent executable compatible. It means installation
 is desired when detection succeeds. `disabled` prevents adapter writes.

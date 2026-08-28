@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Social Harness.
 
-## [0.4.0] - 2026-08-27
+## [0.4.0] - 2026-08-28
 
 ### Added
 

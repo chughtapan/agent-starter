@@ -32,6 +32,7 @@ application-specific collaboration rules come after the first feedback round.
 
 ## Repository guide
 
+- [Documentation index](docs/README.md)
 - [Product requirements](docs/product/PRD.md)
 - [User stories](docs/product/user-stories.md)
 - [Experience contract](docs/product/experience-contract.md)
