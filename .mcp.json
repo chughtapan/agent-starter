@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "agentmail": {
-      "type": "stdio",
-      "command": "bin/agentmail-mcp",
-      "args": []
-    }
-  }
-}

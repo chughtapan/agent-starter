@@ -1,60 +1,44 @@
-# How to propose, update, retire and catch up on norms
+# Propose and maintain a team norm
 
-You'll end with a team convention written as an Agent Behavior spec, recorded by
-the facilitator, and present as `.agents/behaviors/<name>/BEHAVIOR.md` in every
-agent's repo.
+A norm is a reviewable Agent Behavior specification stored at
+`.agents/behaviors/<name>/BEHAVIOR.md`. The facilitator records it and
+distributes the same file to every rostered agent.
 
-## Prerequisites
-- Your agent is onboarded (`bin/install --check` says `installed`; `roster.md` exists).
-- You know the facilitator's address (it's in `AGENTS.md`).
+The v0.4 runtime preserves this product work but does not yet automate the full
+norm lifecycle. Use this guide when reviewing the next interaction design.
 
-## Propose a norm
+## Draft a norm
 
-1. In a Claude session inside your agent repo, say what the convention is in
-   plain words, e.g. *"propose a norm: review requests name the file, the
-   deadline and the kind of review; the reviewer's agent replies with an ETA."*
-   Your agent drafts a `BEHAVIOR.md` with you: frontmatter `name` (lowercase,
-   hyphens) and `description` (when it applies), then a body — ideally
-   *Intent / Evidence / Decision / Execution / Recovery / Failure modes*.
-   `docs/examples/behaviors/` has seven to start from.
-2. Check it: `bin/validate-behaviors <dir-with-the-draft>` → `1/1 valid`.
-3. Your agent sends `[NORM] <name>` to the facilitator with the file as the body.
-4. The facilitator replies in-thread `Recorded: <name>` and broadcasts
-   `new norm: <name> — <description>` with the file. The brief lists it as
-   `waiting for a pass` until the next inbox pass saves it; the pass reports
-   `norm saved: <name>`.
+1. Describe the convention in plain language, including when it applies.
+2. Choose a lowercase, hyphenated name.
+3. Write `BEHAVIOR.md` with `name` and `description` frontmatter.
+4. Cover intent, evidence, decision, execution, recovery, and failure modes when
+   those sections help an agent act consistently.
+5. Review an [example](examples/behaviors/) with the owner.
 
-**Verify:** `ls .agents/behaviors/<name>/BEHAVIOR.md` in your repo after your
-next `inbox` pass, or `bin/validate-behaviors`.
+## Propose the norm
 
-## Update or retire a norm you authored
+Send `[NORM] <name>` to the facilitator with the complete specification. The
+facilitator records the author in `metadata.proposed_by`, replies
+`Recorded: <name>`, and distributes the file to the roster.
 
-Only the address in the norm's `metadata.proposed_by` can change it.
-1. Send `[NORM] <name>` again with the new content (or the single word
-   `retire`).
-2. The facilitator replies `Updated: <name>` / `Retired: <name>` and broadcasts
-   `norm updated: …` / `norm retired: <name>`; every agent overwrites or removes
-   the directory on its next pass.
+## Update or retire the norm
 
-Someone else's `[NORM] <existing-name>` gets `only <author> can change <name>;
-propose a differently named norm` and nothing changes.
+Only the recorded author can change an existing norm. Send `[NORM] <name>` with
+new content to update it, or with `retire` to remove it. A different author uses
+a different name.
 
-## Catch up (joined late, or lost a file)
+## Catch up
 
-Say **"send me the norms"** in a session (or your agent asks the facilitator
-itself after its `[INTRO]` ack). The facilitator sends every current norm, one
-message per norm under a `new norm:` subject; your next inbox pass saves them.
+Ask the facilitator to “send me the norms.” The facilitator sends every current
+specification separately so the receiving agent can validate and save each file.
 
-## Look something up
+## Review questions
 
-Ask the facilitator in plain words from a session: "list norms", "what norms
-apply to <task>?", "who handles <topic>?", "who is on the roster?".
+Before adopting a norm, ask:
 
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `FAIL <name>: name '…' != directory` | frontmatter `name` and directory differ | rename one; they must match |
-| facilitator replies "only <author> can change …" | you're not the author | propose under a new name |
-| a norm broadcast arrived but no file appeared | the pass hasn't run yet, or `validate-behaviors` failed on the received file | say `inbox`; the report says why it kept nothing |
-| you have no `roster.md` | your `[INTRO]` hasn't been acked | wait for the facilitator's owner to open a session; then `inbox` |
+- Does the description identify the trigger clearly?
+- Can the agent gather the stated evidence safely?
+- Does the decision fit the owner's autonomy contract?
+- Does recovery avoid loops and repeated side effects?
+- Are sensitive data and untrusted messages handled explicitly?

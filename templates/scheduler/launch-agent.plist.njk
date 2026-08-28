@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ label | escape }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ nodePath | escape }}</string>
+    <string>{{ cliPath | escape }}</string>
+    <string>poll</string>
+    <string>--once</string>
+  </array>
+  <key>StartInterval</key><integer>{{ intervalSeconds }}</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>{{ standardOutPath | escape }}</string>
+  <key>StandardErrorPath</key><string>{{ standardErrorPath | escape }}</string>
+</dict>
+</plist>
