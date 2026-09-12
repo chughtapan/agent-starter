@@ -1,0 +1,58 @@
+{
+  "packageRuntime": "node",
+  "folderChildCountOverrides": [
+    {
+      "folder": "src",
+      "maxChildren": 20,
+      "reason": "The runtime intentionally uses one flat capability module per service so the complete local product remains easy to scan. Split a capability when this budget is exceeded."
+    }
+  ],
+  "sharedFolderNames": [
+    {
+      "folder": "domain",
+      "reason": "Current versioned data contracts are a shared kernel, split into cohesive configuration, identity, collaboration, and runtime modules."
+    }
+  ],
+  "facadeFiles": [
+    {
+      "file": "src/adapters.ts",
+      "reason": "This is the stable boundary for detecting and installing supported agent hosts."
+    },
+    {
+      "file": "src/board.ts",
+      "reason": "This is the stable boundary for rendering and presenting collaboration updates."
+    },
+    {
+      "file": "src/config.ts",
+      "reason": "This is the stable boundary for validated runtime configuration."
+    },
+    {
+      "file": "src/mailbox.ts",
+      "reason": "This is the stable boundary around the AgentMail transport and collaboration state."
+    },
+    {
+      "file": "src/migration.ts",
+      "reason": "This is the single required boundary for all earlier-format detection, conversion, and removal."
+    },
+    {
+      "file": "src/onboarding.ts",
+      "reason": "This is the stable boundary for the resumable one-prompt onboarding workflow."
+    },
+    {
+      "file": "src/poller.ts",
+      "reason": "This is the stable boundary for host-neutral background synchronization."
+    },
+    {
+      "file": "src/scheduler.ts",
+      "reason": "This is the stable boundary for machine-local routine installation."
+    },
+    {
+      "file": "src/storage.ts",
+      "reason": "This is the stable boundary for private atomic persistence."
+    },
+    {
+      "file": "src/templates.ts",
+      "reason": "This is the stable boundary for packaged document rendering."
+    }
+  ]
+}
