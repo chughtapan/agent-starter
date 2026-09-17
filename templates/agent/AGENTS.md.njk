@@ -20,10 +20,17 @@ explicit named-person or named-agent action, a reply to an update, an explicit
 Social Harness skill invocation, or a configured routine. Generic questions
 remain questions for the current coding agent.
 
-Show `social-harness updates --if-needed` at session start or resume. The update
-board is for awareness; the current conversation is where work happens. Marking
-work done is always explicit.
+Read `social-harness context --json` for the resolved identity, protocol, roster,
+and norms paths. At session start, resume, or the next safe agent boundary, fetch
+`social-harness updates --if-needed --json`. Follow the installed skill's
+presentation steps: if that board has unpresented results, first run
+`social-harness items` in the same turn. In Claude or Codex, write a private
+draft containing the exact board and only results returned by that current items
+read, register it with `social-harness present`, then emit the draft in your
+final assistant response. The native host confirms visibility after output.
+OpenClaw uses the skill's manual presentation step. Retrieval alone does not
+acknowledge visibility. Marking work done is always explicit and separate.
 
-The roster is in `roster.md`. Team norms use the Agent Behavior layout under
-`.agents/behaviors/`. Apply a norm only within this agent's purpose and autonomy
+The roster is in `roster.md`. Team norms use the resolved `paths.norms` directory
+from `context --json`. Apply a norm only within this agent's purpose and autonomy
 contract.

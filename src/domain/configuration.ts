@@ -2,6 +2,7 @@
  * @file Defines the versioned user configuration and installation defaults.
  */
 
+import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
 const IsoDuration = Schema.String.check(
@@ -37,6 +38,13 @@ class BackupConfig extends Schema.Class<BackupConfig>('BackupConfig')({
   gitExport: Schema.Literals(['disabled', 'enabled']),
 }) {}
 
+class SoftwareUpdatesConfig extends Schema.Class<SoftwareUpdatesConfig>(
+  'SoftwareUpdatesConfig',
+)({
+  enabled: Schema.Boolean,
+  checkInterval: IsoDuration,
+}) {}
+
 /** Defines the complete, versioned user configuration file. */
 export class HarnessConfig extends Schema.Class<HarnessConfig>('HarnessConfig')(
   {
@@ -51,6 +59,14 @@ export class HarnessConfig extends Schema.Class<HarnessConfig>('HarnessConfig')(
       openClaw: AdapterConfig,
     }),
     backup: BackupConfig,
+    softwareUpdates: SoftwareUpdatesConfig.pipe(
+      Schema.withDecodingDefaultKey(
+        Effect.succeed({ enabled: true, checkInterval: 'PT24H' }),
+      ),
+      Schema.withConstructorDefault(
+        Effect.succeed({ enabled: true, checkInterval: 'PT24H' }),
+      ),
+    ),
   },
 ) {}
 
@@ -78,5 +94,9 @@ export function makeDefaultConfig(): HarnessConfig {
       openClaw: AdapterConfig.make({ mode: 'auto' }),
     },
     backup: BackupConfig.make({ gitExport: 'disabled' }),
+    softwareUpdates: SoftwareUpdatesConfig.make({
+      enabled: true,
+      checkInterval: 'PT24H',
+    }),
   });
 }

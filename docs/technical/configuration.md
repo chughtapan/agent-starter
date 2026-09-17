@@ -31,6 +31,10 @@ values fail diagnosis and onboarding instead of silently changing behavior.
   },
   "backup": {
     "gitExport": "disabled"
+  },
+  "softwareUpdates": {
+    "enabled": true,
+    "checkInterval": "PT24H"
   }
 }
 ```
@@ -39,23 +43,26 @@ Durations use positive ISO 8601 time forms such as `PT15M`, `PT1H`, and `PT30S`.
 
 ## Fields
 
-| Field                        | Values                                | Meaning                                        |
-| ---------------------------- | ------------------------------------- | ---------------------------------------------- |
-| `schemaVersion`              | `1`                                   | Persisted configuration contract               |
-| `polling.interval`           | ISO duration                          | Local mailbox check cadence                    |
-| `updates.profile`            | `compact`, `singleLine`, `detailed`   | Reserved renderer choice; v0.4 renders compact |
-| `updates.staleAfter`         | ISO duration                          | Repeat unchanged board after this time         |
-| `updates.characterSet`       | `auto`, `unicode`, `ascii`            | Reserved terminal compatibility preference     |
-| `notifications.enabled`      | Boolean                               | Reserved local notification switch             |
-| `notifications.openHost`     | String                                | Reserved host for future notification routing  |
-| `execution.preferredAdapter` | `auto`, `claude`, `codex`, `openClaw` | Reserved default work-surface preference       |
-| `adapters.*.mode`            | `auto`, `enabled`, `disabled`         | Detection and installation policy              |
-| `backup.gitExport`           | `disabled`, `enabled`                 | Reserved optional export switch                |
+| Field                           | Values                                | Meaning                                                    |
+| ------------------------------- | ------------------------------------- | ---------------------------------------------------------- |
+| `schemaVersion`                 | `1`                                   | Persisted configuration contract                           |
+| `polling.interval`              | ISO duration                          | Local mailbox check cadence                                |
+| `updates.profile`               | `compact`, `singleLine`, `detailed`   | Reserved renderer choice; v0.4 renders compact             |
+| `updates.staleAfter`            | ISO duration                          | Repeat unchanged board after this time                     |
+| `updates.characterSet`          | `auto`, `unicode`, `ascii`            | ASCII uses hyphen separators; auto/unicode use middle dots |
+| `notifications.enabled`         | Boolean                               | Reserved local notification switch                         |
+| `notifications.openHost`        | String                                | Reserved host for future notification routing              |
+| `execution.preferredAdapter`    | `auto`, `claude`, `codex`, `openClaw` | Reserved default work-surface preference                   |
+| `adapters.*.mode`               | `auto`, `enabled`, `disabled`         | Detection and installation policy                          |
+| `backup.gitExport`              | `disabled`, `enabled`                 | Reserved optional export switch                            |
+| `softwareUpdates.enabled`       | Boolean                               | Automatically apply verified stable releases when due      |
+| `softwareUpdates.checkInterval` | ISO duration                          | Minimum interval between automatic release checks          |
 
-In v0.4, runtime behavior reads `polling.interval`, `updates.staleAfter`, and
-`adapters.*.mode`. The other fields are validated and persisted so their future
-behavior can be added without changing the configuration shape, but they do not
-change runtime behavior in this release.
+Runtime behavior reads `polling.interval`, `updates.staleAfter`,
+`updates.characterSet`, `adapters.*.mode`, and `softwareUpdates.*`. The
+remaining fields are validated and persisted so their future behavior can be
+added without changing the configuration shape, but they do not change runtime
+behavior in this release.
 
 `enabled` does not make an absent executable compatible. It means installation
 is desired when detection succeeds. `disabled` prevents adapter writes.
@@ -64,14 +71,24 @@ is desired when detection succeeds. `disabled` prevents adapter writes.
 
 The runtime reads environment configuration through Effect Config:
 
-| Variable              | Purpose                                                      |
-| --------------------- | ------------------------------------------------------------ |
-| `HOME`                | Required user home                                           |
-| `SOCIAL_HARNESS_HOME` | Override the installed data root for tests or managed setups |
-| `AGENTMAIL_HOME`      | Override AgentMail credential storage                        |
-| `AGENTMAIL_API`       | Override the AgentMail API base URL                          |
-| `AGENTMAIL_API_KEY`   | In-memory credential override                                |
-| `AGENTMAIL_INBOX`     | In-memory inbox override                                     |
+| Variable                        | Purpose                                                           |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `HOME`                          | Required user home                                                |
+| `SOCIAL_HARNESS_USER_HOME`      | Native host and shared skill root for isolated tests              |
+| `CLAUDE_CONFIG_DIR`             | Native Claude profile override                                    |
+| `CODEX_HOME`                    | Native Codex profile override                                     |
+| `SOCIAL_HARNESS_HOME`           | Override the installed data root for tests or managed setups      |
+| `AGENTMAIL_HOME`                | Override AgentMail credential storage                             |
+| `AGENTMAIL_API`                 | Override the AgentMail API base URL                               |
+| `AGENTMAIL_API_KEY`             | In-memory credential override                                     |
+| `AGENTMAIL_INBOX`               | In-memory inbox override                                          |
+| `SOCIAL_HARNESS_SCHEDULER_MODE` | `manual` disables launchd writes for isolated runs                |
+| `SOCIAL_HARNESS_LAUNCHD_LABEL`  | Production label or a dedicated `dev.social-harness.eval.*` label |
+
+An explicit user-home override cannot install the production launchd label. Do
+not use the production home or label for disposable evaluations. The stable
+bootstrap supplies `SOCIAL_HARNESS_BOOTSTRAP` internally so installed hooks and
+the scheduler continue to use the same executable after release activation.
 
 File credentials are the normal path. Environment credentials take precedence
 but are never persisted by Social Harness.

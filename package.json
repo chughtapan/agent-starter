@@ -1,6 +1,6 @@
 {
   "name": "social-harness",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Collaboration for the coding agents people already use.",
   "type": "module",
   "license": "Apache-2.0",
@@ -18,7 +18,7 @@
     "NOTICE"
   ],
   "bin": {
-    "social-harness": "dist/cli.js"
+    "social-harness": "dist/upgrades/bootstrap.js"
   },
   "engines": {
     "node": ">=22"
@@ -27,7 +27,9 @@
     "architecture": "safer-architecture-lsp check .",
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm format:check && pnpm lint && pnpm architecture && pnpm typecheck && pnpm test",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist .evals-build",
+    "evals:build": "tsc -p tsconfig.evals.json",
+    "evals": "pnpm evals:build && node .evals-build/cli.js",
     "format": "prettier --write --ignore-unknown .",
     "format:check": "prettier --check --ignore-unknown .",
     "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/.eslintcache --cache-strategy content --concurrency off --max-warnings 0 && agent-code-guard-knip",

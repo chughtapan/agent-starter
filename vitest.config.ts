@@ -8,6 +8,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    // Bound process fan-out so filesystem properties keep their timeout budget.
+    maxWorkers: 2,
     testTimeout: 10_000,
   },
 });

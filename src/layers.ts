@@ -6,17 +6,19 @@ import * as NodeHttpClient from '@effect/platform-node/NodeHttpClient';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import * as Layer from 'effect/Layer';
 
-import { adaptersLayer } from './adapters.js';
-import { boardLayer } from './board.js';
-import { configurationLayer } from './config.js';
-import { mailboxLayer } from './mailbox.js';
-import { migrationLayer } from './migration.js';
-import { onboardingLayer } from './onboarding.js';
-import { pathsLayer } from './paths.js';
-import { pollerLayer } from './poller.js';
-import { schedulerLayer } from './scheduler.js';
-import { storageLayer } from './storage.js';
-import { documentTemplatesLayer } from './templates.js';
+import { onboardingLayer } from './application/commissioning/index.js';
+import { migrationLayer } from './application/migration/index.js';
+import { pollerLayer } from './application/polling/index.js';
+import { mailboxLayer } from './collaboration/mail/index.js';
+import {
+  boardLayer,
+  receiptsLayer,
+} from './collaboration/presentation/index.js';
+import { adaptersLayer, schedulerLayer } from './hosts/index.js';
+import { configurationLayer } from './platform/configuration/index.js';
+import { documentTemplatesLayer } from './platform/documents/index.js';
+import { pathsLayer, storageLayer } from './platform/persistence/index.js';
+import { releasePackagesLayer, upgradesLayer } from './upgrades/index.js';
 
 const platformLayer = Layer.mergeAll(
   NodeServices.layer,
@@ -44,7 +46,16 @@ const featureLayer = Layer.mergeAll(
   boardLayer,
   onboardingLayer,
   migrationLayer,
-).pipe(Layer.provideMerge(scheduledIntegrationLayer));
+).pipe(
+  Layer.provideMerge(
+    receiptsLayer.pipe(Layer.provideMerge(scheduledIntegrationLayer)),
+  ),
+);
 
+const upgradedFeatures = upgradesLayer.pipe(
+  Layer.provideMerge(
+    releasePackagesLayer.pipe(Layer.provideMerge(featureLayer)),
+  ),
+);
 /** Complete production dependency graph, provided only at the application edge. */
-export const mainLayer = pollerLayer.pipe(Layer.provideMerge(featureLayer));
+export const mainLayer = pollerLayer.pipe(Layer.provideMerge(upgradedFeatures));

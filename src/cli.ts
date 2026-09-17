@@ -11,16 +11,23 @@ import * as Option from 'effect/Option';
 import * as Command from 'effect/unstable/cli/Command';
 import * as Flag from 'effect/unstable/cli/Flag';
 
-import { Adapters } from './adapters.js';
-import { Board } from './board.js';
-import { Configuration } from './config.js';
+import {
+  contextCommand,
+  doctorCommand,
+  hostHookCommand,
+  presentCommand,
+  presentedCommand,
+  upgradeCommand,
+} from './application/commands/index.js';
+import { Onboarding } from './application/commissioning/index.js';
+import { Migration } from './application/migration/index.js';
+import { Poller } from './application/polling/index.js';
+import { Mailbox, THREAD_LABELS } from './collaboration/mail/index.js';
+import { Board } from './collaboration/presentation/index.js';
 import { OnboardingInput } from './domain/identity.js';
+import { Adapters, Scheduler } from './hosts/index.js';
 import { mainLayer } from './layers.js';
-import { Mailbox, THREAD_LABELS } from './mailbox.js';
-import { Migration } from './migration.js';
-import { Onboarding } from './onboarding.js';
-import { Poller } from './poller.js';
-import { Scheduler } from './scheduler.js';
+import { Configuration } from './platform/configuration/index.js';
 
 const updates = Command.make(
   'updates',
@@ -31,11 +38,16 @@ const updates = Command.make(
     ifNeeded: Flag.boolean('if-needed').pipe(
       Flag.withDescription('Print only after a change or stale interval.'),
     ),
+    json: Flag.boolean('json'),
   },
-  Effect.fn('cli.updates')(function* ({ force, ifNeeded }) {
+  Effect.fn('cli.updates')(function* ({ force, ifNeeded, json }) {
     const board = yield* Board;
     const result = yield* board.check(force || !ifNeeded);
     if (result.shouldPresent) {
+      if (json) {
+        yield* Console.log(JSON.stringify(result, null, 2));
+        return;
+      }
       yield* Console.log(result.rendered);
       if (result.warning !== undefined) {
         yield* Console.log(`Using last known updates: ${result.warning}`);
@@ -151,7 +163,7 @@ const adaptersDetect = Command.make(
     const probes = yield* adapters.detect();
     yield* Console.log(JSON.stringify(probes, null, 2));
   }),
-);
+).pipe(Command.withDescription('Inspect supported host installations.'));
 
 const adaptersInstall = Command.make(
   'install',
@@ -161,12 +173,56 @@ const adaptersInstall = Command.make(
     const probes = yield* adapters.installDetected();
     yield* Console.log(JSON.stringify(probes, null, 2));
   }),
+).pipe(
+  Command.withDescription('Install owned hooks and skills for detected hosts.'),
 );
 
 const adapterCommands = Command.make('adapters').pipe(
   Command.withDescription('Detect and additively install supported hosts.'),
   Command.withSubcommands([adaptersDetect, adaptersInstall]),
 );
+
+const repair = Command.make(
+  'repair',
+  {
+    dryRun: Flag.boolean('dry-run'),
+    adaptersOnly: Flag.boolean('adapters-only'),
+  },
+  Effect.fn('cli.repair')(function* ({ dryRun, adaptersOnly }) {
+    const adapters = yield* Adapters;
+    const scheduler = yield* Scheduler;
+    const hosts = yield* adapters.installDetected({ dryRun });
+    const background = adaptersOnly
+      ? undefined
+      : yield* scheduler.install({ dryRun });
+    yield* Console.log(JSON.stringify({ dryRun, hosts, background }, null, 2));
+  }),
+).pipe(
+  Command.withDescription(
+    'Reconcile owned host resources and, unless limited, the background routine.',
+  ),
+);
+
+const triage = Command.make(
+  'triage',
+  {
+    messageId: Flag.string('message-id'),
+    kind: Flag.choice('kind', [
+      'needsYou',
+      'ready',
+      'waiting',
+      'working',
+      'failed',
+    ]),
+  },
+  Effect.fn('cli.triage')(function* ({ messageId, kind }) {
+    const mailbox = yield* Mailbox;
+    yield* mailbox.triage(messageId, kind);
+    yield* Console.log(
+      'Collaboration state updated; completion remains explicit.',
+    );
+  }),
+).pipe(Command.withDescription('Set the visible state of one open result.'));
 
 const identityFlags = {
   agentName: Flag.string('agent-name'),
@@ -207,6 +263,8 @@ const onboardRun = Command.make(
       yield* Console.log(`Pending: ${result.pending.join(', ')}`);
     }
   }),
+).pipe(
+  Command.withDescription('Create or resume the saved setup checkpoints.'),
 );
 
 const onboardStatus = Command.make(
@@ -216,7 +274,7 @@ const onboardStatus = Command.make(
     const onboarding = yield* Onboarding;
     yield* Console.log(JSON.stringify(yield* onboarding.status(), null, 2));
   }),
-);
+).pipe(Command.withDescription('Show saved setup checkpoints.'));
 
 const onboardVerify = Command.make(
   'verify',
@@ -226,7 +284,7 @@ const onboardVerify = Command.make(
     yield* onboarding.verify(code);
     yield* Console.log('Agent inbox verified. Resume onboarding.');
   }),
-);
+).pipe(Command.withDescription('Verify the AgentMail signup code.'));
 
 const onboardAcknowledge = Command.make(
   'acknowledge',
@@ -236,6 +294,10 @@ const onboardAcknowledge = Command.make(
     yield* onboarding.acknowledge();
     yield* Console.log('Setup verified and complete.');
   }),
+).pipe(
+  Command.withDescription(
+    'Complete setup after the facilitator reply is visibly presented.',
+  ),
 );
 
 const onboard = Command.make('onboard').pipe(
@@ -245,6 +307,45 @@ const onboard = Command.make('onboard').pipe(
     onboardVerify,
     onboardStatus,
     onboardAcknowledge,
+    Command.make(
+      'host-verified',
+      {
+        host: Flag.choice('host', [
+          'claude',
+          'codex',
+          'native',
+          'openClaw',
+        ]).pipe(Flag.withDefault('native')),
+      },
+      Effect.fn('cli.onboard.hostVerified')(function* ({ host }) {
+        const onboarding = yield* Onboarding;
+        yield* onboarding.verifyHost(host);
+        yield* Console.log(
+          host === 'native'
+            ? 'A native host presentation was verified. This does not identify the active host. Resume commissioning.'
+            : `${host} presentation verified. Resume commissioning.`,
+        );
+      }),
+    ).pipe(
+      Command.withDescription(
+        'Record native or supported-host presentation proof during setup.',
+      ),
+    ),
+    Command.make(
+      'retry-introduction',
+      {},
+      Effect.fn('cli.onboard.retryIntroduction')(function* () {
+        const onboarding = yield* Onboarding;
+        yield* onboarding.retryIntroduction();
+        yield* Console.log(
+          'Uncertain send cleared. Resume onboarding only after confirming the introduction was not delivered.',
+        );
+      }),
+    ).pipe(
+      Command.withDescription(
+        'Explicitly permit retry after inspecting uncertain introduction delivery.',
+      ),
+    ),
   ]),
 );
 
@@ -255,47 +356,11 @@ const configShow = Command.make(
     const configuration = yield* Configuration;
     yield* Console.log(JSON.stringify(yield* configuration.load(), null, 2));
   }),
-);
+).pipe(Command.withDescription('Show the validated local configuration.'));
 
 const config = Command.make('config').pipe(
+  Command.withDescription('Inspect Social Harness configuration.'),
   Command.withSubcommands([configShow]),
-);
-
-const doctor = Command.make(
-  'doctor',
-  {},
-  Effect.fn('cli.doctor')(function* () {
-    const adapters = yield* Adapters;
-    const mailbox = yield* Mailbox;
-    const configuration = yield* Configuration;
-    const config = yield* configuration.load();
-    const inbox = yield* mailbox.verifyConnection();
-    const probes = yield* adapters.detect();
-    const scheduler = yield* Scheduler;
-    const schedulerStatus = yield* scheduler.status();
-    yield* Console.log(`CONFIG schema ${String(config.schemaVersion)}: ok`);
-    yield* Console.log(`MAIL ${inbox}: ok`);
-    yield* Console.log(
-      `BACKGROUND ${schedulerStatus.installed ? 'ready' : schedulerStatus.detail}`,
-    );
-    yield* Effect.forEach(
-      probes,
-      (probe) => {
-        let status = 'not installed';
-        if (!probe.detected) {
-          status = 'not found';
-        } else if (!probe.compatible) {
-          status = 'disabled';
-        } else if (probe.installed) {
-          status = 'ready';
-        }
-        return Console.log(`${probe.name.toUpperCase()} ${status}`);
-      },
-      { concurrency: 1, discard: true },
-    );
-  }),
-).pipe(
-  Command.withDescription('Verify local setup and live AgentMail access.'),
 );
 
 const poll = Command.make(
@@ -314,7 +379,7 @@ const migrationPlan = Command.make(
     const migration = yield* Migration;
     yield* Console.log(JSON.stringify(yield* migration.plan(source), null, 2));
   }),
-);
+).pipe(Command.withDescription('Inspect a legacy clone without changing it.'));
 
 const migrationApply = Command.make(
   'apply',
@@ -331,6 +396,10 @@ const migrationApply = Command.make(
     const result = yield* migration.apply(source, deleteSource);
     yield* Console.log(`Migrated and removed ${result.sourceRepo}.`);
   }),
+).pipe(
+  Command.withDescription(
+    'Apply a preflighted legacy migration and optionally remove its clone.',
+  ),
 );
 
 const migrate = Command.make('migrate').pipe(
@@ -341,12 +410,19 @@ const migrate = Command.make('migrate').pipe(
 );
 
 /** Social Harness internal CLI used by agent skills and host hooks. */
-export const cli = Command.make('social-harness').pipe(
+const cli = Command.make('social-harness').pipe(
   Command.withDescription(
     'Collaboration for the coding agents people already use.',
   ),
   Command.withSubcommands([
     updates,
+    upgradeCommand,
+    presentedCommand,
+    presentCommand,
+    contextCommand,
+    hostHookCommand,
+    repair,
+    triage,
     done,
     items,
     request,
@@ -354,13 +430,13 @@ export const cli = Command.make('social-harness').pipe(
     adapterCommands,
     onboard,
     config,
-    doctor,
+    doctorCommand,
     poll,
     migrate,
   ]),
 );
 
-Command.run(cli, { version: '0.4.0' }).pipe(
+Command.run(cli, { version: '0.6.0' }).pipe(
   Effect.provide(mainLayer),
   NodeRuntime.runMain,
 );

@@ -12,6 +12,12 @@
   </array>
   <key>StartInterval</key><integer>{{ intervalSeconds }}</integer>
   <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+{% for name, value in environment %}
+    <key>{{ name | escape }}</key><string>{{ value | escape }}</string>
+{% endfor %}
+  </dict>
   <key>StandardOutPath</key><string>{{ standardOutPath | escape }}</string>
   <key>StandardErrorPath</key><string>{{ standardErrorPath | escape }}</string>
 </dict>

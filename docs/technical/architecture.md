@@ -8,7 +8,7 @@ application-specific behavior.
 
 ```text
 Claude ─┐
-Codex ──┼─ host skill + start hook ─┐
+Codex ──┼─ host skill + safe-boundary hook ─┐
 OpenClaw┘                           │
                                     ▼
                          Social Harness runtime
@@ -17,10 +17,12 @@ OpenClaw┘                           │
                        AgentMail HTTP transport
 ```
 
-The host adapter is deliberately thin. Claude and Codex add an idempotent
-`SessionStart` command and a skill. OpenClaw uses the shared Agent Skills
-directory; its background automation remains deferred. One launchd routine calls
-the host-neutral poller on macOS.
+The host adapter is deliberately thin. Claude and Codex add an idempotent set of
+`SessionStart`, `UserPromptSubmit`, `PostToolUse`, and `Stop` commands and a
+skill. The native hook supplies a trusted reminder; the agent retrieves mail
+separately and visibly presents it at a safe boundary. OpenClaw uses the shared
+Agent Skills directory; its background automation remains deferred. One launchd
+routine calls the host-neutral poller on macOS.
 
 ## Installed layout
 
@@ -35,11 +37,20 @@ the host-neutral poller on macOS.
       behaviors/
         */BEHAVIOR.md
   runtime/
+    active-release.json
+    versions/
   config.json
   state/
     identity.json
     mailbox-cache.json
     presentation.json
+    receipts/
+    acknowledgements/
+    pending-presentations/
+    host-observation.json
+    host-observation-claude.json
+    host-observation-codex.json
+    software-updates.json
     onboarding.json
     ownership.json
     migration.json
@@ -60,23 +71,28 @@ Schema-decoded value.
 
 ## Runtime modules
 
-| Module or directory | Responsibility                                           |
-| ------------------- | -------------------------------------------------------- |
-| `domain/`           | Cohesive current Schemas for config, identity, and state |
-| `config.ts`         | Config and ConfigProvider decoding plus Schema encoding  |
-| `paths.ts`          | User-level paths derived from Effect Config              |
-| `storage.ts`        | Private, atomic filesystem persistence                   |
-| `templates.ts`      | Typed rendering service for packaged Nunjucks assets     |
-| `templates/`        | Installed instructions, messages, and generated files    |
-| `mailbox.ts`        | AgentMail HTTP boundary and canonical label transitions  |
-| `board.ts`          | Compact rendering and presentation policy                |
-| `adapters.ts`       | Additive Claude, Codex, and OpenClaw installation        |
-| `scheduler.ts`      | One machine-local timer adapter                          |
-| `poller.ts`         | Host-neutral synchronization through Effect Schedule     |
-| `onboarding.ts`     | Resumable commissioning checkpoints and smoke tests      |
-| `migration.ts`      | All compatibility parsing, translation, and cleanup      |
-| `cli.ts`            | Effect CLI used by skills, hooks, and diagnostics        |
-| `layers.ts`         | Dependency graph, provided at the program edge           |
+| Public module                         | Responsibility                                                     |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| `application/commands/index.ts`       | Host context, visibility acknowledgement, diagnostics, upgrade CLI |
+| `application/commissioning/index.ts`  | Resumable setup and verified acknowledgement                       |
+| `application/migration/index.ts`      | Legacy preflight, conversion, and cleanup                          |
+| `application/polling/index.ts`        | One synchronization loop and due update checks                     |
+| `collaboration/mail/index.ts`         | AgentMail transport and canonical labels                           |
+| `collaboration/presentation/index.ts` | Board retrieval and visible-result receipts                        |
+| `hosts/index.ts`                      | Native adapter and launchd installation                            |
+| `platform/configuration/index.ts`     | Schema-decoded runtime policy                                      |
+| `platform/documents/index.ts`         | Packaged Nunjucks instructions                                     |
+| `platform/persistence/index.ts`       | Private atomic files and isolated paths                            |
+| `upgrades/index.ts`                   | Stable release policy, activation, and rollback                    |
+| `domain/`                             | Shared versioned value contracts                                   |
+| `cli.ts`, `layers.ts`                 | Process and production composition edges                           |
+
+Cross-module imports use `index.ts`. Service contracts are separate from their
+implementations to prevent circular imports through the public entry point. The
+architecture gate enforces public entry points and dependency direction:
+application workflows call feature APIs; features call platform APIs; platform
+services have no dependency on workflows. Expected failures belong to the module
+that reports them.
 
 All external and persisted values cross a Schema boundary. Expected failures are
 tagged errors. Services are declared with `Context.Service`, constructed by
@@ -115,9 +131,10 @@ Message labels:
 - `sh-done`
 
 The newest message determines whether a completed thread reopened. Message
-attention states take precedence over thread progress states. `sh-done`
-suppresses that message. A new inbound message without `sh-done` is classified
-again.
+attention states take precedence over thread progress states. Explicit triage
+also records waiting/working/failed on the selected message so an old thread
+state cannot misclassify a newer inbound reply. `sh-done` suppresses that
+message. A new inbound message without `sh-done` is classified again.
 
 ```text
 inbound unread ──▶ READY / NEEDS YOU
@@ -133,18 +150,26 @@ saw the board.
 
 ## Update presentation
 
-The presentation signature contains message ID, state, and update timestamp. The
-board is due when forced, never presented, changed, or older than
-`updates.staleAfter`. Presentation state is local because it answers whether
-this owner’s hosts have shown the board; the message label supports shared
-diagnosis without closing the item.
+The signature contains message ID, state, timestamp, collaborator, and task
+summary. The board is due when forced, never presented, changed, stale, or when
+an eligible result has not been visibly acknowledged. Retrieval issues a
+snapshot receipt and never records visibility. Native hosts register an exact
+assistant draft with `present`. Their Stop callback compares the actual final
+assistant text against that draft before acknowledging visibility and adding
+presentation labels. Registration, tool output, and interrupted responses do not
+count. OpenClaw's skill surface uses an explicit manual `presented` step. A
+board-only receipt leaves unseen results eligible. Presentation state is local
+because it answers whether this owner’s hosts have shown the board; the message
+label supports shared diagnosis without closing the item.
 
 ## Adapter ownership
 
 Adapter installation records every owned file or config entry in
 `state/ownership.json`. Hook merge preserves top-level settings, hook events,
-and hook commands from other tools. Repeated installation finds the owned
-command marker and does not duplicate it.
+and hook commands from other tools. Repeated installation finds the owned exact
+owned command structure and does not duplicate it. `repair --dry-run` previews
+changes. Structural installation, native hook observation, and Codex hook trust
+are separate evidence; file presence does not prove readiness.
 
 Detection uses installed executables plus configuration. `auto` installs a
 detected host, `disabled` leaves it alone, and `enabled` still reports absence
@@ -158,9 +183,9 @@ The process does not invoke Claude, Codex, or OpenClaw, so installing several
 host adapters cannot multiply work. Launchd naturally stops checks while the
 machine is asleep.
 
-Other operating systems report a manual scheduler requirement in v0.4. Cloud
-routines and provider-specific schedulers are future adapters and cannot be used
-to make current delivery promises.
+Other operating systems report a manual scheduler requirement in the current
+release. Cloud routines and provider-specific schedulers are future adapters and
+cannot be used to make current delivery promises.
 
 ## Onboarding state
 
@@ -173,33 +198,46 @@ mailVerified
 runtimeInstalled
 adaptersInstalled
 localSmokePassed
+hostVerified
 introSent
 facilitatorAckReceived
 resultPresented
 ```
 
 Each phase is written only after its verification succeeds. A rerun skips
-completed side effects such as sending the introduction. The last two phases
-remain separate so receipt and user-visible completion cannot be conflated.
-Inbox signup occurs before `identitySaved`; the verified address becomes part of
-the identity document. Until the owner supplies the emailed code, `mailVerified`
-remains pending while local setup can continue.
+completed side effects such as sending the introduction. An uncertain send is
+recorded before submission and requires explicit recovery if no matching sent
+item can be found. A changed identity cannot reuse earlier checkpoints. The last
+two phases remain separate so receipt and user-visible completion cannot be
+conflated. Inbox signup occurs before `identitySaved`; the verified address
+becomes part of the identity document. Until the owner supplies the emailed
+code, `mailVerified` remains pending while local setup can continue.
 
 ## Migration safety
 
 Migration resolves an exact source directory and records a plan before writes.
 It blocks for product source, an undecodable identity, unknown top-level files,
-or dirty Git state. Apply also requires explicit source-deletion authorization.
-It converts the legacy identity, copies the roster, status, and Agent Behavior
-specifications, and installs and verifies the new runtime before cleanup. It
-then translates legacy mailbox labels, removes source-specific hooks, the old
-MCP entry, poller, notifier, and runtime state, writes the migration record, and
-removes the dedicated clone.
+dirty Git state, conflicting canonical content, symbolic links, or a source that
+contains a protected runtime or host directory. Apply also requires explicit
+source-deletion authorization. It converts the legacy identity, copies the
+roster, status, and Agent Behavior specifications, and installs and verifies the
+new runtime before cleanup. It then translates legacy mailbox labels, removes
+source-specific hooks, the old MCP entry, poller, notifier, and runtime state,
+writes the migration record, and removes the dedicated clone.
 
 The migration code never uses a broad home-directory target, glob, unresolved
 environment variable, or implicit current directory for deletion.
 
-`migration.ts` is the only runtime file that knows earlier filenames, labels,
-identity syntax, hooks, or cleanup targets. Other services expose current,
-transport-neutral operations. This boundary prevents compatibility branches from
-becoming permanent product behavior.
+`application/migration/` is the only module that knows earlier filenames,
+labels, identity syntax, hooks, or cleanup targets. Other services expose
+current, transport-neutral operations. This boundary prevents compatibility
+branches from becoming permanent product behavior.
+
+## Software updates
+
+The same poller checks stable GitHub releases when due. Verified packages are
+staged before an atomic active-release pointer change. The installed bootstrap
+continues using the selected version; failed candidates are quarantined and
+rollback restores the prior owned resources. See
+[software updates](software-updates.md) for the HTTPS/checksum trust model,
+dry-run commands, and recovery procedure.

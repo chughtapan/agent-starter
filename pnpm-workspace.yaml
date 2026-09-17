@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@chughtapan/safer-architecture-lsp@0.3.1': patches/@chughtapan__safer-architecture-lsp@0.3.1.patch

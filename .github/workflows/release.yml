@@ -1,0 +1,68 @@
+name: Stable release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Validate stable tag
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(manifest.version) ||
+              process.env.GITHUB_REF_NAME !== `v${manifest.version}`) {
+            throw new Error('A stable tag must exactly match package.json version.');
+          }
+          JS
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - run: node dist/upgrades/bootstrap.js --help
+      - name: Pack immutable release assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/social-harness-release"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/social-harness-release"
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const file = `social-harness-${version}.tgz`;
+          const root = join(process.env.RUNNER_TEMP, 'social-harness-release');
+          const sha256 = createHash('sha256').update(readFileSync(join(root, file))).digest('hex');
+          writeFileSync(join(root, 'release.json'), JSON.stringify({
+            schemaVersion: 1,
+            repository: 'chughtapan/agent-starter',
+            version,
+            file,
+            sha256,
+          }, null, 2) + '\n');
+          JS
+      - name: Publish the stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/social-harness-release/social-harness-${GITHUB_REF_NAME#v}.tgz" \
+            "$RUNNER_TEMP/social-harness-release/release.json" \
+            --repo chughtapan/agent-starter --verify-tag --generate-notes

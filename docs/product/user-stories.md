@@ -1,6 +1,6 @@
 # User stories
 
-These stories define the maintained v0.4 behavior. Each story uses an observable
+These stories define the v0.5 candidate behavior. Each story uses an observable
 “when I …, Social Harness …” form so it can become a walkthrough or acceptance
 test.
 
@@ -48,6 +48,8 @@ test.
 
 - When a result arrives, it appears as a dedicated message with the outcome
   first and its actual source named.
+- When a result arrives during ordinary work, my active host presents it at its
+  next supported safe boundary without asking me to manage a session.
 - When a result has been presented, it remains `READY` until I explicitly mark
   it done.
 - When I ask for more detail, the conversation expands the result; the board
@@ -86,6 +88,17 @@ test.
   leaves it alone.
 - When AgentMail is unavailable, the board uses the last valid cache and names
   the limitation instead of fabricating fresh state.
+
+## Receive software updates
+
+- When a stable release is available, the existing local poller verifies and
+  installs it without adding another background routine.
+- When an update changes owned skills or hooks, my other host settings survive
+  and any required native trust review remains explicit.
+- When an update fails verification or startup, the previous working version
+  remains available and the failed version is not repeatedly reinstalled.
+- When I disable automatic updates, my agent can still inspect available
+  releases and update on my instruction.
 
 ## Migrate
 
