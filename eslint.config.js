@@ -49,6 +49,7 @@ export default [
   {
     ignores: [
       '.repos/**',
+      '.evals-build/**',
       'coverage/**',
       'dist/**',
       'eslint.config.js',
@@ -56,7 +57,7 @@ export default [
     ],
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'evals/**/*.ts'],
     ...guard.configs.recommended,
     rules: {
       ...guard.configs.recommended.rules,
@@ -74,13 +75,34 @@ export default [
       // following Google's DAMP test guidance.
       'agent-code-guard/no-hardcoded-assertion-literals': 'off',
       'agent-code-guard/no-test-skip-only': 'error',
+      'agent-code-guard/no-example-only-tests': [
+        'error',
+        {
+          propertyCallNames: [
+            'fc.property',
+            'fc.asyncProperty',
+            'it.prop',
+            'test.prop',
+            'it.effect.prop',
+          ],
+        },
+      ],
     },
   },
   {
     files: [
-      'tests/config.test.ts',
-      'tests/distribution.test.ts',
-      'tests/templates.test.ts',
+      'tests/platform/config.test.ts',
+      'tests/upgrades/distribution.test.ts',
+      'tests/platform/templates.test.ts',
+      'tests/platform/paths.test.ts',
+      'tests/hosts/scheduler.test.ts',
+      'tests/application/migration-flow.test.ts',
+      'tests/collaboration/presentation.test.ts',
+      'tests/collaboration/mailbox-http.test.ts',
+      // These commissioning regressions exercise transport and checkpoint
+      // ordering; fixed traces are the relevant oracle, not generated inputs.
+      'tests/application/onboarding-flow.test.ts',
+      'tests/tooling/architecture-tool.test.ts',
     ],
     rules: {
       // Effect's layered test wrapper is not recognized as a test container by

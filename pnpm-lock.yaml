@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@chughtapan/safer-architecture-lsp@0.3.1':
+    hash: bde470bc2f45ab491d8c75fa7e6573970dc13ecee584780f2f8416b1f3de1c69
+    path: patches/@chughtapan__safer-architecture-lsp@0.3.1.patch
+
 importers:
 
   .:
@@ -23,7 +28,7 @@ importers:
     devDependencies:
       '@chughtapan/safer-architecture-lsp':
         specifier: 0.3.1
-        version: 0.3.1
+        version: 0.3.1(patch_hash=bde470bc2f45ab491d8c75fa7e6573970dc13ecee584780f2f8416b1f3de1c69)
       '@effect/vitest':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@3.2.7(@types/node@24.3.0)(jiti@2.7.0)(yaml@2.9.0))
@@ -1903,7 +1908,7 @@ packages:
 
 snapshots:
 
-  '@chughtapan/safer-architecture-lsp@0.3.1':
+  '@chughtapan/safer-architecture-lsp@0.3.1(patch_hash=bde470bc2f45ab491d8c75fa7e6573970dc13ecee584780f2f8416b1f3de1c69)':
     dependencies:
       chokidar: 5.0.0
       effect: 3.22.1

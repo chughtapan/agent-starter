@@ -4,6 +4,14 @@
 
 import * as Schema from 'effect/Schema';
 
+/** Host events that offer a safe opportunity to present collaboration updates. */
+export const HostHookEvent = Schema.Literals([
+  'SessionStart',
+  'UserPromptSubmit',
+  'PostToolUse',
+  'Stop',
+]);
+
 /** Describes one detected or installed host adapter. */
 export class AdapterProbe extends Schema.Class<AdapterProbe>('AdapterProbe')({
   name: Schema.Literals(['claude', 'codex', 'openClaw']),
@@ -13,7 +21,28 @@ export class AdapterProbe extends Schema.Class<AdapterProbe>('AdapterProbe')({
   executable: Schema.optionalKey(Schema.String),
   configPath: Schema.optionalKey(Schema.String),
   conflict: Schema.optionalKey(Schema.String),
+  version: Schema.optionalKey(Schema.String),
+  capability: Schema.optionalKey(Schema.Literals(['unverified', 'observed'])),
+  trust: Schema.optionalKey(Schema.Literals(['unverified', 'notRequired'])),
 }) {}
+
+/**
+ * Reconciles resources by their actual file or config-entry identity.
+ * @param previous Previously recorded resources.
+ * @param incoming Resources verified during this operation.
+ * @returns One entry per resource, keeping the latest ownership classification.
+ */
+export function mergeOwnershipEntries(
+  previous: readonly OwnershipEntry[],
+  incoming: readonly OwnershipEntry[],
+): readonly OwnershipEntry[] {
+  const entries = new Map<string, OwnershipEntry>();
+  for (const entry of [...previous, ...incoming]) {
+    const key = JSON.stringify([entry.kind, entry.path, entry.identifier]);
+    entries.set(key, entry);
+  }
+  return [...entries.values()];
+}
 
 /** Records a file or config entry owned by Social Harness. */
 export class OwnershipEntry extends Schema.Class<OwnershipEntry>(

@@ -21,6 +21,12 @@ documents to assess feasibility and implementation.
   onboarding procedure
 - [Configuration](technical/configuration.md): public configuration contract
 - [Testing](technical/testing.md): risk-based verification strategy
+- [Live evaluations](../evals/README.md): isolated Claude/Codex execution and
+  evidence
+- [Software updates](technical/software-updates.md): stable releases and
+  recovery
+- [Current-state audit](audits/current-state-2026-09-12.md): findings, fixes,
+  and remaining live gates
 - [Code quality](technical/code-quality.md): local review gates and tool setup
 - [Decisions](decisions/README.md): accepted architectural decisions
 

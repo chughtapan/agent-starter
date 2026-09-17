@@ -41,8 +41,11 @@ Rules:
 - Do not put the substantive result, setup health, session count, transport
   name, or scheduler in the board.
 - Do not rely on color, animation, emoji, or cursor position.
-- Present on start/resume, change, or stale interval.
+- Present on start/resume, or the next safe agent boundary after a change or
+  stale interval.
 - A background poll updates cache but never records presentation.
+- Retrieval never consumes eligibility. Record a visibility receipt only after
+  showing the board and the result IDs actually presented to the owner.
 
 `NEEDS YOU` means the owner must decide or supply information. `READY` means a
 result can be reviewed. `WAITING` means the next move belongs to another party.
@@ -124,7 +127,7 @@ When the owner explicitly asks to check collaboration setup, report:
 ```text
 COLLABORATION SETUP
 CONFIG      ok
-MAIL        ok · agent@example.com
+MAIL        ok · owner@example.test
 BACKGROUND  ready · checks while Mac is awake
 CLAUDE      ready
 CODEX       ready

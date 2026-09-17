@@ -27,6 +27,13 @@ system.
 
 - Every API response and persisted cache crosses an Effect Schema boundary.
 - Triage must not clear unread, and presentation must not mark done.
+- A local snapshot receipt records explicit visibility; fetching a board or
+  message is not evidence that the owner saw it.
+- Claude and Codex register a pending assistant draft. Their native Stop event
+  must confirm the emitted text before the runtime records presentation. An
+  agent's assertion that it showed a result is insufficient.
+- Explicit progress triage applies to the selected message as well as its
+  thread, so an old thread label cannot hide a later inbound reply.
 - The newest message determines whether a thread reopened.
 - The runtime depends on AgentMail label and message-update behavior.
 

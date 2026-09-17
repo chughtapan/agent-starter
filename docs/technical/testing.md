@@ -4,14 +4,20 @@ The test strategy follows user risk, not module count. Use `@effect/vitest` for
 Effect programs and Layers for shared service setups. Do not call
 `Effect.runPromise` manually in ordinary tests.
 
-The current 32-test baseline is documented in the
-[test suite audit](../audits/test-suite-audit.md). The component and live checks
-below are required target coverage unless the audit says they already exist.
+The earlier 32-test baseline is documented in the
+[test suite audit](../audits/test-suite-audit.md). The
+[current audit](../audits/current-state-2026-09-12.md) records the expanded
+regressions and remaining live gates. Do not treat component tests as proof of
+native skill discovery, authentication, hook trust, or conversation visibility.
 
 ## Presubmit
 
-`pnpm check` runs formatting, ESLint, strict TypeScript, and focused Vitest
-tests. `pnpm build` verifies emitted Node ESM and the CLI entry point.
+`pnpm check` runs formatting, ESLint, Knip, the architecture gate, strict
+TypeScript, and Vitest. `pnpm build` verifies emitted Node ESM. Run
+`node dist/cli.js --help` and `node dist/upgrades/bootstrap.js --help`
+afterward. The packaged-install regression compiles and installs an actual
+tarball offline in a temporary home, then exercises the installed bootstrap and
+templates.
 
 ## Target test layers
 
@@ -26,7 +32,9 @@ tests. `pnpm build` verifies emitted Node ESM and the CLI entry point.
 
 ### Component
 
-- Use temporary `SOCIAL_HARNESS_HOME` and `AGENTMAIL_HOME` directories.
+- Isolate `HOME`, `SOCIAL_HARNESS_USER_HOME`, `SOCIAL_HARNESS_HOME`,
+  `AGENTMAIL_HOME`, `CLAUDE_CONFIG_DIR`, and `CODEX_HOME`. Use manual scheduling
+  unless a test explicitly owns a `dev.social-harness.eval.*` launchd label.
 - Provide a fake Effect HTTP client for list, thread, message-update, send,
   reply, outage, and malformed-response paths.
 - Provide test filesystem and child-process layers for adapter detection,
@@ -65,3 +73,24 @@ Before internal dogfood:
 
 Before the external pilot, complete one live round trip in each supported host
 and add regression tests for every observed failure trace.
+
+## Repeatable native evaluations
+
+Use the [evaluation driver](../../evals/README.md) for preflight, isolated
+preparation, real host skill discovery, generic negative prompts, and the
+request/reply/present/done/reopen flow. Run each automated scenario three times.
+Read the canonical message-label snapshots alongside native host transcripts;
+tool output alone does not prove that the owner saw a result.
+
+Use two authorized dedicated test inboxes and distinct owner aliases. Reuse
+verified test credentials when available; signing up again with an existing
+email can rotate its credential. Reserve new aliases for fresh-signup cases. Use
+separately authenticated native profiles, or the explicitly authorized
+`--reuse-native-auth` option described in the evaluation README. Keep candidate
+skills, hooks, and mail state isolated in either mode. Complete Codex hook
+review inside the disposable profile; do not bypass native trust.
+
+The matrix in the evaluation README also tracks manual OTP recovery, interrupted
+setup, outage/stale-cache behavior, host-closed delivery, sleep/wake, OpenClaw,
+and published stable-release transitions. Missing evidence is a blocked or
+unexecuted gate, never a pass.

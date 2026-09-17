@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "declaration": false,
+    "noEmit": false,
+    "outDir": ".evals-build",
+    "rootDir": "evals",
+    "types": ["node"]
+  },
+  "include": ["evals/**/*.ts"],
+  "exclude": ["tests/**/*.ts"]
+}

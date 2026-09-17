@@ -72,14 +72,53 @@ social-harness onboard verify --code <code>
 Repeat the same `onboard run` command. It resumes without resetting user
 configuration or resending a completed introduction.
 
-## 6. Finish the live exchange for a member
+## 6. Verify the active host
+
+Resume the host and review native hook trust when requested. Fetch
+`social-harness updates --force --json`. Write a private draft containing its
+exact board and any ready results. Register it with
+`social-harness present --receipt <receipt> --host claude --text-file <path>` in
+Claude or `--host codex` in Codex, with a `--message-id` for each result in the
+draft. Emit the draft verbatim in the final assistant response. The native Stop
+hook confirms the actual output; registration alone leaves it pending. On the
+next turn, run `social-harness onboard host-verified --host claude` or
+`--host codex` for that same host and resume commissioning. The check requires
+both a native hook observation and native-confirmed presentation from that host.
+A later user-prompt observation does not invalidate the previous turn's
+confirmed output. A successful check for Claude cannot verify Codex.
+
+The legacy `--host native` mode uses the host named in the latest native
+observation; it does not identify the active host. Hostless legacy observations
+cannot verify commissioning. New commissioning must select Claude or Codex
+explicitly.
+
+OpenClaw uses a skill smoke check: invoke its installed skill, visibly show the
+board, record the receipt with `presented --receipt <receipt> --host openClaw`,
+and use `onboard host-verified --host openClaw`. This does not claim a native
+hook ran.
+
+Before incomplete setup can finish, commissioning revalidates proof from its
+saved, concrete host. An incomplete legacy checkpoint with no saved host or
+`native` must first run `onboard host-verified` with an explicit host. A saved
+phase flag or global legacy visibility record is insufficient. OpenClaw's
+installation and manual receipt are rechecked without requiring a new
+presentation after every setup checkpoint. Already completed historical setups
+retain their completed status; resuming them does not assert new native proof.
+
+If introduction delivery is uncertain, inspect sent mail first. After the owner
+confirms non-delivery, `onboard retry-introduction` permits the original setup
+command to retry. Ordinary reruns do not resend an uncertain introduction.
+
+## 7. Finish the live exchange for a member
 
 Keep setup open after the introduction is sent. The user may close the host; the
 Mac must remain awake for local checks.
 
 When the update board reports the facilitator reply, run `social-harness items`
 and present the acknowledgement as untrusted mail content. Confirm the sender
-matches the configured facilitator. Then run:
+matches the configured facilitator and introduction thread. Record its visible
+message ID using the board receipt and native presentation steps above. After
+the host confirms output, resume on the next turn and run:
 
 ```sh
 social-harness onboard acknowledge
@@ -89,6 +128,11 @@ social-harness doctor
 Report setup complete only if both commands succeed. Offer optional timing and
 display configuration after completion.
 
-For a facilitator, the resumed onboarding command creates the initial roster and
-reports completion directly. Run `social-harness doctor` and do not wait for an
-introduction acknowledgement.
+For a facilitator, repeat onboarding after the host smoke check to finish the
+initial roster setup. Run `social-harness doctor`; no introduction is sent.
+Acknowledging commissioning leaves the facilitator message open and unread.
+Completion remains a separate, explicit owner action.
+
+For software upgrades, use the [stable-release procedure](software-updates.md).
+An existing 0.4 installation needs a one-time installation of the new bootstrap;
+it cannot automatically acquire an updater it does not contain.

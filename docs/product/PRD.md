@@ -1,8 +1,8 @@
-# Product requirements: Social Harness v0.4
+# Product requirements: Social Harness v0.5 candidate
 
-- Status: Internal vertical slice
+- Status: Internal candidate; live acceptance gates pending
 - Owner: Product and engineering
-- Last updated: 2026-08-27
+- Last updated: 2026-09-12
 
 ## Summary
 
@@ -45,6 +45,8 @@ recognized the problem and will provide exact use cases and failure traces.
    local poller.
 6. Migration removes the old product-owned wiring without leaving duplicate
    hooks, skills, pollers, state, or a dedicated clone.
+7. Installed runtime code, skills, and owned host wiring receive verified stable
+   updates through the existing local poller, with recovery from failed updates.
 
 ## Non-goals
 
@@ -82,6 +84,10 @@ inventory. It appears:
 
 The default stale interval is one hour. Narrow, ASCII-safe, and detailed
 profiles remain configuration options; compact is the release gate.
+
+During an active conversation, newly available results are presented at the next
+supported safe boundary. Hidden retrieval and hook context do not count as
+visible presentation. An interrupted presentation remains eligible.
 
 ### Results and completion
 
@@ -124,6 +130,19 @@ The owner can ask the agent to check collaboration setup. The agent reports
 configuration, AgentMail access, local background routine, and each supported
 host. Setup diagnostics do not appear in the normal update board.
 
+### Software updates
+
+The existing local poller checks for stable releases daily by default. It
+verifies and stages a release before activation, reconciles owned skills and
+host wiring, and preserves non-owned settings. A failed candidate is quarantined
+and the previous working version remains available. Updates never bypass native
+host trust review. The owner can disable automatic checks.
+
+Existing v0.4 installations need one explicit bootstrap upgrade before they can
+receive automatic updates. See
+[the stable-update decision](../decisions/0009-stable-software-updates.md) for
+the release and recovery boundaries.
+
 ## Data and state requirements
 
 AgentMail is canonical for collaboration state. The release uses thread labels
@@ -151,7 +170,7 @@ Installed user data lives under `~/.social-harness/`; secrets remain in
 - Preserve all non-owned host configuration, including other products’ hooks.
 - Use the current host as the default work surface; never ask the user to pick
   from sessions.
-- Treat all three adapters as release gates for their supported v0.4 surface.
+- Treat all three adapters as release gates for their supported surface.
 
 ## Migration requirements
 
@@ -166,8 +185,9 @@ the migration and is reported exactly.
 
 ## Release plan
 
-1. v0.4 internal dogfood: complete one real round trip on each host and capture
-   confusion and failure traces.
+1. v0.5 candidate validation: complete the
+   [live evaluation matrix](../../evals/README.md), including three repetitions
+   of each automated native scenario, and capture confusion and failure traces.
 2. Feedback round: revise only the interaction contract and adapter behavior
    needed to address observed failures.
 3. External pilot: use the same product and commissioning flow, with no bespoke

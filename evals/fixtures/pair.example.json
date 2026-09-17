@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "dedicatedTestIdentities": false,
+  "claude": { "name": "Eval Claude" },
+  "codex": { "name": "Eval Codex" }
+}

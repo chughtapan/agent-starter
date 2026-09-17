@@ -39,15 +39,6 @@ export class MailboxCache extends Schema.Class<MailboxCache>('MailboxCache')({
   updates: Schema.Array(CollaborationUpdate),
 }) {}
 
-/** Stores when and what an adapter last presented to the owner. */
-export class PresentationState extends Schema.Class<PresentationState>(
-  'PresentationState',
-)({
-  schemaVersion: Schema.Literal(1),
-  lastSignature: Schema.String,
-  lastPresentedAt: Schema.String,
-}) {}
-
 /** Contains the full untrusted message behind a collaboration update. */
 export class CollaborationItem extends Schema.Class<CollaborationItem>(
   'CollaborationItem',

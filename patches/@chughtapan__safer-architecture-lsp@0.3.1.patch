@@ -1,0 +1,34 @@
+diff --git a/dist/analyzer/folder-shape/index.js b/dist/analyzer/folder-shape/index.js
+index ad5223a81bf96f97cca1bdc17410869d25155dd8..c4d62a63c8cd1f7cddcca8df8a6723c4677f4f20 100644
+--- a/dist/analyzer/folder-shape/index.js
++++ b/dist/analyzer/folder-shape/index.js
+@@ -38,11 +38,27 @@ function folderReadmeRequiredDiagnostic(children, graph, options) {
+     return [missingReadmeDiagnostic(children, graph, options)];
+ }
+ function folderHasReadme(graph, folder, options) {
+-    const directory = path.join(graph.projectRoot, sourceFolderPath(folder));
++    const directory = actualFolderDirectory(graph, folder);
+     return options.folderReadmeFileNames.some((fileName) => fs.existsSync(path.join(directory, fileName)));
+ }
++// Source roots need not be src/. Use the analyzed file's real directory for
++// both direct modules and ancestor folders containing only nested modules.
++function actualFolderDirectory(graph, folder) {
++    const module = graph.modules.find((entry) => entry.folder === folder) ??
++        graph.modules.find((entry) => folder === "." || entry.folder.startsWith(`${folder}/`));
++    if (module === undefined) {
++        return path.join(graph.projectRoot, sourceFolderPath(folder));
++    }
++    let directory = path.dirname(module.fileName);
++    const depth = module.folder === "." ? 0 : module.folder.split("/").length;
++    const targetDepth = folder === "." ? 0 : folder.split("/").length;
++    for (let index = targetDepth; index < depth; index += 1) {
++        directory = path.dirname(directory);
++    }
++    return directory;
++}
+ function missingReadmeDiagnostic(children, graph, options) {
+-    const folderPath = sourceFolderPath(children.folder);
++    const folderPath = path.relative(graph.projectRoot, actualFolderDirectory(graph, children.folder));
+     const readmeName = options.folderReadmeFileNames[0] ?? "README.md";
+     return {
+         ruleId: "folder-readme-required",

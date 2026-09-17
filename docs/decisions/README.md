@@ -10,6 +10,7 @@ Accepted decisions for the first product version:
 - [0006: Require clean, preflighted migration](0006-clean-migration.md)
 - [0007: Package generated documents as templates](0007-packaged-document-templates.md)
 - [0008: Use repository-local quality guards](0008-repository-quality-guards.md)
+- [0009: Distribute stable software updates](0009-stable-software-updates.md)
 
 Use [the template](template.md) for new decisions. Do not create decision
 lineage metadata before the first product version is complete. Update an

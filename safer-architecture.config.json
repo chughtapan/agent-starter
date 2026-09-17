@@ -1,58 +1,149 @@
 {
   "packageRuntime": "node",
-  "folderChildCountOverrides": [
-    {
-      "folder": "src",
-      "maxChildren": 20,
-      "reason": "The runtime intentionally uses one flat capability module per service so the complete local product remains easy to scan. Split a capability when this budget is exceeded."
-    }
-  ],
   "sharedFolderNames": [
     {
       "folder": "domain",
-      "reason": "Current versioned data contracts are a shared kernel, split into cohesive configuration, identity, collaboration, and runtime modules."
+      "reason": "Versioned schemas and tagged errors are shared value contracts without runtime orchestration."
     }
   ],
-  "facadeFiles": [
+  "layers": [
     {
-      "file": "src/adapters.ts",
-      "reason": "This is the stable boundary for detecting and installing supported agent hosts."
+      "name": "application",
+      "folders": [
+        "application/commands",
+        "application/commissioning",
+        "application/migration",
+        "application/polling"
+      ],
+      "reason": "User workflows coordinate lower-level capabilities."
     },
     {
-      "file": "src/board.ts",
-      "reason": "This is the stable boundary for rendering and presenting collaboration updates."
+      "name": "features",
+      "folders": [
+        "collaboration/presentation",
+        "upgrades",
+        "hosts",
+        "collaboration/mail"
+      ],
+      "reason": "Independent capabilities use validated local services and do not depend on application workflows."
     },
     {
-      "file": "src/config.ts",
-      "reason": "This is the stable boundary for validated runtime configuration."
+      "name": "configuration-and-documents",
+      "folders": ["platform/configuration", "platform/documents"],
+      "reason": "Configuration and rendering depend only on persistence and value contracts."
     },
     {
-      "file": "src/mailbox.ts",
-      "reason": "This is the stable boundary around the AgentMail transport and collaboration state."
+      "name": "persistence",
+      "folders": ["platform/persistence"],
+      "reason": "Files and path resolution have no knowledge of product workflows."
     },
     {
-      "file": "src/migration.ts",
-      "reason": "This is the single required boundary for all earlier-format detection, conversion, and removal."
+      "name": "contracts",
+      "folders": ["domain"],
+      "reason": "Schemas and errors carry values without service dependencies."
+    }
+  ],
+  "domains": [
+    {
+      "name": "commands",
+      "roots": ["src/application/commands"],
+      "entrypoints": ["src/application/commands/index.ts"],
+      "reason": "Host events and diagnostics translate CLI actions into feature calls."
     },
     {
-      "file": "src/onboarding.ts",
-      "reason": "This is the stable boundary for the resumable one-prompt onboarding workflow."
+      "name": "commissioning",
+      "roots": ["src/application/commissioning"],
+      "entrypoints": ["src/application/commissioning/index.ts"],
+      "reason": "Commissioning owns resumable identity setup and acknowledgement."
     },
     {
-      "file": "src/poller.ts",
-      "reason": "This is the stable boundary for host-neutral background synchronization."
+      "name": "migration",
+      "roots": ["src/application/migration"],
+      "entrypoints": ["src/application/migration/index.ts"],
+      "reason": "Migration owns all legacy conversion and cleanup."
     },
     {
-      "file": "src/scheduler.ts",
-      "reason": "This is the stable boundary for machine-local routine installation."
+      "name": "polling",
+      "roots": ["src/application/polling"],
+      "entrypoints": ["src/application/polling/index.ts"],
+      "reason": "Polling schedules mail refresh and due software checks."
     },
     {
-      "file": "src/storage.ts",
-      "reason": "This is the stable boundary for private atomic persistence."
+      "name": "presentation",
+      "roots": ["src/collaboration/presentation"],
+      "entrypoints": ["src/collaboration/presentation/index.ts"],
+      "reason": "Presentation separates retrieved updates from visible results."
     },
     {
-      "file": "src/templates.ts",
-      "reason": "This is the stable boundary for packaged document rendering."
+      "name": "upgrades",
+      "roots": ["src/upgrades"],
+      "entrypoints": ["src/upgrades/index.ts"],
+      "reason": "Upgrades own release selection, staging, activation, and recovery."
+    },
+    {
+      "name": "hosts",
+      "roots": ["src/hosts"],
+      "entrypoints": ["src/hosts/index.ts"],
+      "reason": "Hosts own native adapter and local scheduler installation."
+    },
+    {
+      "name": "mail",
+      "roots": ["src/collaboration/mail"],
+      "entrypoints": ["src/collaboration/mail/index.ts"],
+      "reason": "Mail owns transport and collaboration label semantics."
+    },
+    {
+      "name": "configuration",
+      "roots": ["src/platform/configuration"],
+      "entrypoints": ["src/platform/configuration/index.ts"],
+      "reason": "Configuration decodes and persists the runtime policy."
+    },
+    {
+      "name": "documents",
+      "roots": ["src/platform/documents"],
+      "entrypoints": ["src/platform/documents/index.ts"],
+      "reason": "Documents render packaged agent instructions."
+    },
+    {
+      "name": "persistence",
+      "roots": ["src/platform/persistence"],
+      "entrypoints": ["src/platform/persistence/index.ts"],
+      "reason": "Persistence owns private files and isolated paths."
+    },
+    {
+      "name": "contracts",
+      "roots": ["src/domain"],
+      "entrypoints": [
+        "src/domain/collaboration.ts",
+        "src/domain/configuration.ts",
+        "src/domain/identity.ts",
+        "src/domain/runtime.ts",
+        "src/domain/presentation.ts",
+        "src/domain/upgrades.ts"
+      ],
+      "reason": "Versioned value contracts are intentionally shared across feature APIs."
+    }
+  ],
+  "compositionRoots": [
+    {
+      "path": "src/cli.ts",
+      "reason": "The executable registers the public CLI commands."
+    },
+    {
+      "path": "src/layers.ts",
+      "reason": "Production Effect Layers are provided once at the application edge."
+    },
+    {
+      "path": "src/upgrades/bootstrap.ts",
+      "reason": "The stable executable composes only local update recovery services."
+    },
+    {
+      "path": "evals",
+      "reason": "The separate evaluation executable drives installed public CLI and native host boundaries."
+    },
+    {
+      "path": "vitest.config.ts",
+      "reason": "The test runner config composes repository validation tools."
     }
   ]
 }

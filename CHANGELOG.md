@@ -2,6 +2,30 @@
 
 This file records user-visible changes to Social Harness.
 
+## [0.6.0] - 2026-09-17
+
+### Added
+
+- Keep result presentation tied to an exact board snapshot and native host
+  confirmation, with completed work reopening when a later reply arrives.
+- Add a stable software-update entry point with verified staging, rollback, and
+  recovery while preserving owned host resources.
+- Add isolated Claude–Codex live evaluations that retain native, delivery, and
+  visibility evidence without using production mail state.
+
+### Changed
+
+- Reorganize the runtime into public domain, application, collaboration, host,
+  platform, and upgrade module boundaries.
+- Require installed skills to retrieve current result details before presenting
+  them in Claude or Codex.
+
+### Fixed
+
+- Correlate peer replies across AgentMail inboxes through the shared request
+  message ID instead of mailbox-local thread IDs.
+- Preserve Codex's isolated private draft directory when resuming a live turn.
+
 ## [0.4.0] - 2026-08-28
 
 ### Added

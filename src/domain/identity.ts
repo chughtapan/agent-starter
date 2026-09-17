@@ -47,6 +47,7 @@ export const OnboardingPhase = Schema.Literals([
   'runtimeInstalled',
   'adaptersInstalled',
   'localSmokePassed',
+  'hostVerified',
   'introSent',
   'facilitatorAckReceived',
   'resultPresented',
@@ -63,4 +64,30 @@ export class OnboardingState extends Schema.Class<OnboardingState>(
   completed: Schema.Array(OnboardingPhase),
   updatedAt: Schema.String,
   failureTrace: Schema.optionalKey(Schema.String),
+  introThreadId: Schema.optionalKey(Schema.String),
+  introductionPending: Schema.optionalKey(Schema.Boolean),
+  verifiedHost: Schema.optionalKey(
+    Schema.Literals(['claude', 'codex', 'openClaw', 'native']),
+  ),
+}) {}
+
+/** A successful native hook execution observed during commissioning. */
+export class HostObservation extends Schema.Class<HostObservation>(
+  'HostObservation',
+)({
+  schemaVersion: Schema.Literal(1),
+  host: Schema.optionalKey(Schema.Literals(['claude', 'codex'])),
+  event: Schema.Literals(['SessionStart', 'UserPromptSubmit']),
+  observedAt: Schema.String.check(
+    Schema.makeFilter(
+      (value) => {
+        const milliseconds = Date.parse(value);
+        return (
+          Number.isFinite(milliseconds) &&
+          new Date(milliseconds).toISOString() === value
+        );
+      },
+      { expected: 'a canonical UTC timestamp' },
+    ),
+  ),
 }) {}
